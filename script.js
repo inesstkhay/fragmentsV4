@@ -5038,8 +5038,6 @@ function showProxemicView() {
     return (subStart + subEnd) / 2;
   }
 
-  // IMPORTANT :
-  // les bulles centrales de la vue patterns sont TOUJOURS blanches.
   function getPatternNodeBaseStyle() {
     return {
       fill: '#ffffff',
@@ -5047,6 +5045,81 @@ function showProxemicView() {
       stroke: '#222222',
       strokeOpacity: 1
     };
+  }
+
+  // convertit un hsl(...) ou couleur CSS en rgba léger
+  function cssColorWithAlpha(color, alpha = 0.10) {
+    const tmp = document.createElement("div");
+    tmp.style.color = color;
+    document.body.appendChild(tmp);
+
+    const computed = getComputedStyle(tmp).color;
+    document.body.removeChild(tmp);
+
+    const m = computed.match(/rgba?\(([^)]+)\)/);
+    if (!m) return color;
+
+    const parts = m[1].split(",").map(s => s.trim());
+    const r = parseFloat(parts[0]);
+    const g = parseFloat(parts[1]);
+    const b = parseFloat(parts[2]);
+
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  // forme douce autour d’un groupe de points
+  function buildAgencementHaloPath(points, padding = 24) {
+    if (!points || !points.length) return null;
+
+    // 1 point
+    if (points.length === 1) {
+      const p = points[0];
+      return `
+        M ${p.x - padding}, ${p.y}
+        a ${padding},${padding} 0 1,0 ${padding * 2},0
+        a ${padding},${padding} 0 1,0 -${padding * 2},0
+      `;
+    }
+
+    // 2 points
+    if (points.length === 2) {
+      const [a, b] = points;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len;
+      const ny = dx / len;
+
+      const p1 = { x: a.x + nx * padding, y: a.y + ny * padding };
+      const p2 = { x: b.x + nx * padding, y: b.y + ny * padding };
+      const p3 = { x: b.x - nx * padding, y: b.y - ny * padding };
+      const p4 = { x: a.x - nx * padding, y: a.y - ny * padding };
+
+      return d3.line()
+        .curve(d3.curveCatmullRomClosed.alpha(0.7))([p1, p2, p3, p4]);
+    }
+
+    // 3+ points : hull convexe puis léger gonflement depuis le centroïde
+    const raw = points.map(p => [p.x, p.y]);
+    const hull = d3.polygonHull(raw);
+
+    if (!hull || hull.length < 3) return null;
+
+    const cx = d3.mean(hull, p => p[0]);
+    const cy = d3.mean(hull, p => p[1]);
+
+    const expanded = hull.map(([x, y]) => {
+      const dx = x - cx;
+      const dy = y - cy;
+      const len = Math.hypot(dx, dy) || 1;
+      return [
+        x + (dx / len) * padding,
+        y + (dy / len) * padding
+      ];
+    });
+
+    return d3.line()
+      .curve(d3.curveCatmullRomClosed.alpha(0.7))(expanded);
   }
 
   proxemicView.style.position = proxemicView.style.position || "relative";
@@ -5125,6 +5198,7 @@ function showProxemicView() {
   const world = svg.append("g");
   const slicesLayer = world.append("g");
   const trajectoryLayer = world.append("g");
+  const halosLayer = world.append("g");
   const linksLayer = world.append("g");
   const nodesLayer = world.append("g");
   const labelsLayer = world.append("g");
@@ -5240,7 +5314,6 @@ function showProxemicView() {
 
   const ghostData = proxData.filter(d => d.hasGhost);
 
-  // trajectoires grises
   trajectoryLayer.selectAll("line.fragment-trajectory")
     .data(ghostData)
     .join("line")
@@ -5266,6 +5339,56 @@ function showProxemicView() {
     .style("stroke", "#8e8e8e")
     .style("stroke-width", 1.2)
     .style("stroke-opacity", 0.45)
+    .style("pointer-events", "none");
+
+  /* -----------------------------------------------------------
+   * 5bis) HALOS D'AGENCEMENTS
+   * ----------------------------------------------------------- */
+  const proxById = new Map(proxData.map(d => [String(d.id).trim(), d]));
+
+  const haloData = (agencements || [])
+  .filter(ag =>
+    Array.isArray(ag.fragmentIds) &&
+    ag.fragmentIds.length &&
+    Array.isArray(ag.patternIds) &&
+    ag.patternIds.length > 0
+  )
+  .map(ag => {
+      const memberNodes = (ag.fragmentIds || [])
+        .map(fid => proxById.get(String(fid).trim().toUpperCase()))
+        .filter(Boolean);
+
+      if (memberNodes.length < 1) return null;
+
+      const pList = (ag.patternIds || []).slice().sort((a, b) => {
+        return parseInt(String(a).replace("P", ""), 10) - parseInt(String(b).replace("P", ""), 10);
+      });
+
+      const mainPattern = pList[0] || null;
+      const strokeColor = mainPattern ? colorForPattern(mainPattern) : "#888";
+      const fillColor = cssColorWithAlpha(strokeColor, 0.10);
+
+      return {
+        agId: ag.id,
+        patternKey: mainPattern,
+        points: memberNodes.map(n => ({ x: n.x, y: n.y, id: n.id })),
+        path: buildAgencementHaloPath(memberNodes.map(n => ({ x: n.x, y: n.y })), 22),
+        strokeColor,
+        fillColor
+      };
+    })
+    .filter(d => d && d.path);
+
+  halosLayer.selectAll("path.agencement-halo")
+    .data(haloData)
+    .join("path")
+    .attr("class", "agencement-halo")
+    .attr("d", d => d.path)
+    .style("fill", d => d.fillColor)
+    .style("stroke", d => d.strokeColor)
+    .style("stroke-width", 1.6)
+    .style("stroke-dasharray", "6 5")
+    .style("opacity", 0.95)
     .style("pointer-events", "none");
 
   /* -----------------------------------------------------------
@@ -5375,7 +5498,6 @@ function showProxemicView() {
     .attr("class", "node")
     .attr("transform", d => `translate(${d.x},${d.y})`);
 
-  // anneaux colorés de patterns
   nodes.each(function(d) {
     if (!d.patterns) return;
 
@@ -5391,7 +5513,6 @@ function showProxemicView() {
       });
   });
 
-  // bulle centrale blanche
   nodes.append("circle")
     .attr("r", 8)
     .style("fill", d => getPatternNodeBaseStyle(d).fill)
@@ -5421,6 +5542,9 @@ function showProxemicView() {
     trajectoryLayer.selectAll("line.fragment-trajectory, circle.fragment-ghost")
       .style("opacity", d => d.id === id ? 1 : 0.10);
 
+    halosLayer.selectAll("path.agencement-halo")
+      .style("opacity", d => d.points.some(p => p.id === id) ? 1 : 0.08);
+
     const connected = new Set([id]);
     linksData.forEach(L => {
       if (L.source.id === id) connected.add(L.target.id);
@@ -5443,6 +5567,9 @@ function showProxemicView() {
 
     trajectoryLayer.selectAll("circle.fragment-ghost")
       .style("opacity", 1);
+
+    halosLayer.selectAll("path.agencement-halo")
+      .style("opacity", 0.95);
   }
 
   nodes
@@ -5465,11 +5592,7 @@ function showProxemicView() {
         highlight(d.id);
       }
 
-      if (d.trajectoryPair) {
-        openTrajectoryFragmentTabs(d.trajectoryPair);
-      } else {
-        openFragmentWithPatternsTabs(d.feature.properties);
-      }
+      openFragmentWithPatternsTabs(d.feature.properties);
     });
 
   svg.on("click", () => {
@@ -5477,6 +5600,9 @@ function showProxemicView() {
     reset();
   });
 }
+
+
+
 
 function choosePatternKeyFromList(list, messagePrefix = 'Ce fragment appartient à plusieurs patterns :') {
   if (!list || list.length === 0) return null;
@@ -5698,9 +5824,8 @@ function renderPatternBaseGrey() {
         const pair = feature.properties?.__trajectoryPair || null;
 
         layer.on('click', () => {
-          if (pair) openTrajectoryFragmentTabs(pair);
-          else onPatternsMapFragmentClick(feature);
-        });
+  onPatternsMapFragmentClick(feature);
+});
       }
     }
   ).addTo(patternBaseLayer);
