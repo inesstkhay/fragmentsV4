@@ -3,35 +3,27 @@
   "features": [
     {
       "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          2.430902435581231,
-          48.8659547827676
-        ]
-      },
       "properties": {
         "id": "ND001",
         "contenu": "Le manque d'eau, d'ascenseur, de chauffage... c'est pour ça que je dors dans mon salon maintenant, pour avoir moins froid. On paye pour rien! Je vais mettre une banderole pour bien écrire l'immeuble il est insalubre!",
         "auteur": "Adriana",
         "acteur": "Adriana",
         "date": "07/02/2025",
-        "source": "Interview",
+        "source": "Entretien",
         "zone": "Tour TH2",
-        "istit_autonome": 3,
-        "passif_transformateur": 3,
-        "isDiscourse": true
+        "fragment_associe": "N037",
+        "batiment_associe": "NB343"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.430902435581231,
+          48.8659547827676
+        ]
       }
     },
     {
       "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          0.0,
-          0.0
-        ]
-      },
       "properties": {
         "id": "ND002",
         "contenu": "Un des événements que j'ai fait qui est un événement de consultation en pied d'immeuble, on l'a fait le 26-27 février, j'ai envoyé justement des invitations aux élus concernés par la question, donc la culture, la politique de la ville, tous ces trucs-là. Je les ai invités, j'ai eu une réponse d'un élu qui m'a convoqué. Il a voulu être informé sur un sujet de réinformation pour lequel eux-mêmes n'ont pas informé les gens. J'ai trouvé ça marrant parce que sa méfiance vis-à-vis du projet était révélatrice de plein de choses.",
@@ -40,20 +32,22 @@
         "date": "08/09/2022",
         "source": "https://youtu.be/oea-iRZSJ1c?si=UZuS1ysoKoePOeko",
         "zone": "La Noue/Clos Français",
-        "istit_autonome": 5,
-        "passif_transformateur": 4,
-        "isDiscourse": true
+        "fragment_associe": null,
+        "batiment_associe": [
+          "NB362",
+          "NB400"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.4330825741990623,
+          48.864735330089076
+        ]
       }
     },
     {
       "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          2.4344683025273923,
-          48.86532891881157
-        ]
-      },
       "properties": {
         "id": "ND003",
         "contenu": "Multiples personnes exprimant ne pas ouvrir leur porte aux ouvriers depuis qu'ils ont appris les défauts de rénovation.",
@@ -62,42 +56,51 @@
         "date": "24/02/2024",
         "source": "Permanence NPNRU",
         "zone": "Clos Français",
-        "istit_autonome": 5,
-        "passif_transformateur": 3,
-        "isDiscourse": true
+        "fragment_associe": "N013",
+        "batiment_associe": [
+          "NB263",
+          "NB262",
+          "NB352",
+          "NB399"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.4344683025273923,
+          48.86532891881157
+        ]
       }
     },
     {
       "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          0.0,
-          0.0
-        ]
-      },
       "properties": {
         "id": "ND004",
         "contenu": "Et ensuite, il y a toute la partie un peu plus technique où je vais être là pour tout ce qui est réunion de chantier, installation du chantier, avec les services techniques, pour vérifier qu'il n'y a pas des choses qui vont un peu embêter les gens dans leur cadre de vie.",
         "auteur": "Zoé",
         "acteur": "Zoé",
         "date": "17/04/2024",
-        "source": "Interview",
+        "source": "Entretien",
         "zone": "Clos Français",
-        "istit_autonome": 1,
-        "passif_transformateur": 4,
-        "isDiscourse": true
+        "fragment_associe": "N017",
+        "batiment_associe": [
+          "NB263",
+          "NB262",
+          "NB352",
+          "NB399",
+          "NB356"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.431272860037268,
+          48.864052392862845
+        ]
       }
     },
     {
       "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          0.0,
-          0.0
-        ]
-      },
       "properties": {
         "id": "ND005",
         "contenu": "On diffuse des matchs dans le local (...) et en même temps c'est un lieu de rencontre. Parce ici y'a beaucoup de familles nombreuses, on peut pas tous inviter des potes chez nous. (...) Et c'est génant de rester en bas d'une tour, de fumer, de déranger. Donc le but c'était de reproduire ce que les anciens avaient fait, monter une structure et avoir un local dédié aux jeunes du quartier. ",
@@ -106,64 +109,71 @@
         "date": "07/08/2020",
         "source": "https://youtu.be/GeHItUpR3N0?t=338",
         "zone": "La Noue",
-        "istit_autonome": 4,
-        "passif_transformateur": 3,
-        "isDiscourse": true
+        "fragment_associe": null,
+        "batiment_associe": "NB397"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.43206965510106,
+          48.86411684994172
+        ]
       }
     },
     {
       "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          2.432582948879542,
-          48.8647534895222
-        ]
-      },
       "properties": {
         "id": "ND006",
         "contenu": "Il y avait des algéco qui étaient dédiés à ça, ils ont été brûlés en partie. Il y en a un qui a été brûlé en partie. Ça a été une bonne excuse pour ne jamais faire la maison de projet. De ne pas faire de communication, de ne pas faire de réunion publique, de ne pas mettre de poste en interne sur le suivi du chantier.",
         "auteur": "Siamak",
         "acteur": "Est Ensemble Habitat",
         "date": "19/04/2025",
-        "source": "Interview",
+        "source": "Entretien",
         "zone": "Clos Français",
-        "istit_autonome": 1,
-        "passif_transformateur": 1,
-        "isDiscourse": true
+        "fragment_associe": null,
+        "batiment_associe": [
+          "NB263",
+          "NB262",
+          "NB352",
+          "NB399"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.432582948879542,
+          48.8647534895222
+        ]
       }
     },
     {
       "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          0.0,
-          0.0
-        ]
-      },
       "properties": {
         "id": "ND007",
         "contenu": "Nous, on fait ce travail-là. On appuie le collectif, Appuii on les accompagne de faire à la fois des relevés dans les logements avec des architectes bénévoles qui viennent donc documenter toutes les défaillances, ce soit les moisissures, l'amiante, etc. Et les diagnostics thermiques aussi.",
         "auteur": "Houaria",
         "acteur": "APPUII",
         "date": "20/04/2025",
-        "source": "Interview",
+        "source": "Entretien",
         "zone": "Clos Français",
-        "istit_autonome": 3,
-        "passif_transformateur": 3,
-        "isDiscourse": true
+        "fragment_associe": null,
+        "batiment_associe": [
+          "NB263",
+          "NB262",
+          "NB352",
+          "NB399"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.43324874873403,
+          48.865284440580695
+        ]
       }
     },
     {
       "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          2.430716609289675,
-          48.864109563966025
-        ]
-      },
       "properties": {
         "id": "ND008",
         "contenu": "Réflexion critique sur l'implantation sur le quartier qui \"sort de nulle part\" et qui a été refutée par les \"anciens\" du quartier. Respect pour la parole des anciens qui \"savent de quoi ils parlent\"",
@@ -172,64 +182,293 @@
         "date": "28/02/2024",
         "source": "Informel",
         "zone": "On Sème Tous",
-        "istit_autonome": 1,
-        "passif_transformateur": 3,
-        "isDiscourse": true
+        "fragment_associe": "N021",
+        "batiment_associe": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.430716609289675,
+          48.864109563966025
+        ]
       }
     },
     {
       "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          0.0,
-          0.0
-        ]
-      },
-      "properties": {
-        "id": "ND009",
-        "contenu": "Et aussi, on a mis en place le site internet. Parce qu’il y avait ça aussi, c’était qu’à chaque fois, on faisait des comptes rendus que très peu de gens lisaient. Donc là, on a mis en place le site internet où on monte les sujets.",
-        "auteur": "Baptiste",
-        "acteur": "Conseil Citoyen La Noue Bagnolet",
-        "date": "06/04/2024",
-        "source": "Interview",
-        "zone": "La Noue Bagnolet",
-        "istit_autonome": 5,
-        "passif_transformateur": 3,
-        "isDiscourse": true
-      }
-    },
-    {
-      "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          2.4262697239383613,
-          48.87306110888974
-        ]
-      },
       "properties": {
         "id": "ND010",
         "contenu": "Et quand j’ai commencé a utiliser le terrain, je n’ai pas demandé l’autorisation à la mairie. Et moi, j'ai toujours l'habitude de dire que l'asso, elle s'est faite un peu sur les friches de la rénovation urbaine.",
         "auteur": "Gilles Amar",
         "acteur": "La Bergerie des Malassis",
         "date": "21/04/2024",
-        "source": "Interview",
+        "source": "Entretien",
         "zone": "Malassis",
-        "istit_autonome": 5,
-        "passif_transformateur": 5,
-        "isDiscourse": true
+        "fragment_associe": "N051, N052",
+        "batiment_associe": [
+          "NB028",
+          "NB789"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.4262697239383613,
+          48.87306110888974
+        ]
       }
     },
     {
       "type": "Feature",
+      "properties": {
+        "id": "ND011",
+        "contenu": "Et je pense qu'on a aussi une position un peu hybride parce que c'est un peu tout le monde qu'on fait un peu le tampon entre le bailleur et les habitants parce qu'il y a plein d'habitants qui considèrent que vivre dans un logement public et payer son loyer tous les mois, ça veur dire que c’est au bailleur de rénover, sauf que les bailleurs ne sont pas d'obligation de le faire parce que tant que tu es dans le logement, il n'y a pas d'obligation. Donc il y a un peu un truc de les CB, eux, ils pourront faire quelque chose et c'est vrai qu'on vient répondre un peu à un flou du fait que les bailleurs ne pourraient pas répondre aux demandes de tout selon eux et du coup, nous on peut le faire dans la marge avec Jean-Marc, du coup on fait dizaines de chantiers par an ce qui n'est pas non plus énorme mais bon, ce qui fait que on a tout le temps de la demande. ",
+        "auteur": "Andreas",
+        "acteur": "Compagnons Bâtisseurs",
+        "date": "23/04/2025",
+        "source": "Entretien",
+        "zone": "La Noue/Clos Français",
+        "fragment_associe": null,
+        "batiment_associe": [
+          "NB354",
+          "NB381"
+        ]
+      },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          1.3990944173699231,
-          43.56397301822284
+          2.4286905768780116,
+          48.866238482141995
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "ND012",
+        "contenu": "Globalement, l’ANRU 1, s'est mal passé. Avec la concertation d'habitants et ainsi de suite.\nL'ANRU a essayé de corriger le tir. Mais ce n'est pas évident parce que les gens ne se mobilisent pas de façon naturelle. C'est dès qu'ils reçoivent une information très personnelle qu'ils se mobilisent.",
+        "auteur": "Belaide Beldreddine",
+        "acteur": "Élu Municipal",
+        "date": "23/04/2025",
+        "source": "Entretien",
+        "zone": "La Noue/Clos Français",
+        "fragment_associe": null,
+        "batiment_associe": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.431626160856638,
+          48.86412003250615
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "ND013",
+        "contenu": "Discussion autour des fêtes de quartier sur la dalle Thorez “disco soupe”, en 2013/2014, avec le centre social, ils cuisinaient et chantaient. Faisaient aussi la fête des voisins, bals, également concerts du conservatoire.",
+        "auteur": "Françoise",
+        "acteur": "Habitante",
+        "date": "10/07/2025",
+        "source": "Résidence de recherche",
+        "zone": "Malassis/Dalle Thorez",
+        "fragment_associe": null,
+        "batiment_associe": [
+          "NB148",
+          "NB185",
+          "NB182"
         ]
       },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.424037574190521,
+          48.87010019647593
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "ND014",
+        "contenu": "Bâtiment neuf qui a été mal construit. Carrelage de la facade qui s’est écroulé dans la rue.",
+        "auteur": "\"Mumu\" Muriel",
+        "acteur": "Habitante",
+        "date": "10/07/2025",
+        "source": "Résidence de recherche",
+        "zone": "Malassis/Dalle Thorez",
+        "fragment_associe": null,
+        "batiment_associe": "NB149"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.424012916037384,
+          48.86974127155986
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "ND015",
+        "contenu": "Témoignage d'enfants qui ne restent pas aux Malassis mais vont plutot jouer du côté de la Noue (Couverture de l’A3), un endroit qu'ils appellent le “3 parcs”",
+        "auteur": "Groupe de trois enfants",
+        "acteur": "Groupe de trois enfants",
+        "date": "10/07/2025",
+        "source": "Résidence de recherche",
+        "zone": "Malassis/Dalle Thorez",
+        "fragment_associe": "N059, N062, N061",
+        "batiment_associe": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.427428357979352,
+          48.867681591690996
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "ND016",
+        "contenu": "“L’état de la dalle s’est dégradé”. Il trouvait qu’elle était pas trop mal avant mais les commerces au RDC étaient déjà fermés dans les années 2000. Le manque d’entretien est arrivé avec l’annonce de la démolition. ",
+        "auteur": "Raphael",
+        "acteur": "Habitant",
+        "date": "10/07/2025",
+        "source": "Résidence de recherche",
+        "zone": "Malassis/Dalle Thorez",
+        "fragment_associe": "N045",
+        "batiment_associe": [
+          "NB148",
+          "NB185"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.424442783874099,
+          48.87025941538971
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "ND017",
+        "contenu": "Sur la question du NPRNU, elle dit ne pas avoir aimé le quartier quand elle y était arrivée. Et que pour le NPNRU, ils feraient mieux de faire de la maintenance: leur immeuble n’a pas de gardien depuis 18 mois.",
+        "auteur": "Sophie",
+        "acteur": "Habitante",
+        "date": "10/05/2025",
+        "source": "Fête de quartier",
+        "zone": "La Noue/Clos Français",
+        "fragment_associe": null,
+        "batiment_associe": "NB354"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.4287919200919816,
+          48.86577770185292
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "ND018",
+        "contenu": "Habitaient au bâtiment 23 au Clos. Elles habitent maintenant à Robespierre, ont déménagé car elles habitaient dans la barre à la destruction. Elles sont parties il y a 2 ou 3 mois et le vivent très mal. Elles ne voulaient pas partir mais ont pas eu le choix. Elle a tous ses souvenirs d’enfance au Clos. Elles reviennent tout le temps dans le quartier car le quartier leur manque, et se plaignent de la route entre Robespierre et le clos qui est longue. L’ambiance et la solidarité du quartier leur manquent “car à Robespierre personne ne se parle, c’est pas pareil”.",
+        "auteur": "Deux jeunes filles",
+        "acteur": "Deux jeunes filles",
+        "date": "11/05/2025",
+        "source": "Fête de quartier",
+        "zone": "Clos Français",
+        "fragment_associe": "N121",
+        "batiment_associe": "NB400"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.433226275904815,
+          48.86554883814577
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "ND019",
+        "contenu": "Elle a entendu parler du NPNRU, elle pense que la rénovation est positive. Elle pense cependant qu’il n’y a pas besoin de déloger les gens, et que la démolition est une forme de gaspillage. Par exemple, le terrain de pétanque qui est neuf et qui va être démoli alors qu’il a coûté a la collectivité.",
+        "auteur": "Habitante du Clos",
+        "acteur": "Habitante du Clos",
+        "date": "12/05/2025",
+        "source": "Fête de quartier",
+        "zone": "La Noue/Clos Français",
+        "fragment_associe": "N010",
+        "batiment_associe": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.4338901994497064,
+          48.86694987220122
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "ND020",
+        "contenu": "Un moment qui l’a marqué dans le quartier récemment c’était la Coupe d’Afrique des Nations, là ou ils appellent “le cyclo” (qui est le lieu ou il y a maintenant madame tourte) et qui s’appelle comme ça parce que il y avait un atelier de réparation de vélos. ",
+        "auteur": "Adolescente",
+        "acteur": "Adolescente",
+        "date": "13/05/2025",
+        "source": "Fête de quartier",
+        "zone": "La Noue Bagnolet",
+        "fragment_associe": "N135",
+        "batiment_associe": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          2.4257835328352826,
+          48.86479822592011
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": null,
+        "contenu": null,
+        "auteur": null,
+        "acteur": null,
+        "date": null,
+        "source": null,
+        "zone": null,
+        "fragment_associe": null,
+        "batiment_associe": null
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": null,
+        "contenu": null,
+        "auteur": null,
+        "acteur": null,
+        "date": null,
+        "source": null,
+        "zone": null,
+        "fragment_associe": null,
+        "batiment_associe": null
+      },
+      "geometry": null
+    },
+    {
+      "type": "Feature",
       "properties": {
         "id": "MD001",
         "contenu": "Comme pour la piscine Alban Minville, ils devaient la détruire. Alors que pour nous, c'était un équipement qui était primordial, quoi. Et c'est une réussite du Conseil citoyen, ça. On a réussi à la faire maintenir.",
@@ -238,75 +477,445 @@
         "date": "03/04/2024",
         "source": "Informel",
         "zone": "Piscine Alban Minville",
-        "istit_autonome": 5,
-        "passif_transformateur": 4,
-        "isDiscourse": true
+        "fragment_associe": null,
+        "batiment_associe": "MB171"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.3990944173699233,
+          43.56397301822284
+        ]
       }
     },
     {
       "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          1.4039081000258022,
-          43.56935799346349
-        ]
-      },
       "properties": {
         "id": "MD002",
         "contenu": "Au moment de la démolition, je me rappelle qu’il y avait un copain de côté. Et des gens passent, on s’arrête, on regarde, et ils disent : « Moi, mon père, il a travaillé là. Il a fait le chantier. Ça me fait quelque chose ». On passe. Une autre personne dit, « J’y ai habité tant d’années ». Comme ça, les gens devant la démolition parlaient de ce qu’ils ressentaient à ce moment-là. On voyait qu’il y avait une épaisseur, qu’il y avait un rapport, qu’il y avait de la vie. Les gens parlaient de leur vie. Ce n’était pas simplement le béton. Il y avait une présence humaine. Ça disparaît. Il n’y a plus de traces.",
         "auteur": "Jean Pierre Siksik",
         "acteur": "Habitants de la Reynerie",
         "date": "27/03/2025",
-        "source": "Interview",
-        "zone": "Gluck",
-        "istit_autonome": 5,
-        "passif_transformateur": 1,
-        "isDiscourse": true
+        "source": "Entretien",
+        "zone": "Immeuble Gluck",
+        "fragment_associe": "M177, M055",
+        "batiment_associe": "MB201"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.4039081000258022,
+          43.569357993463484
+        ]
       }
     },
     {
       "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          1.3987240697047127,
-          43.56364503845671
-        ]
-      },
       "properties": {
         "id": "MD003",
         "contenu": "On avait une statue, une œuvre d'art qu'on avait au temps des Glorieuses.\r\nEt...Cinquante ans qu'elle est restée là, quand même. Et un jour, on nous l'a enlevée. Elle est partie. Personne ne nous a prévenus.\r",
         "auteur": "Patricia",
         "acteur": "Patricia",
         "date": "14/03/2025",
-        "source": "Interview",
+        "source": "Entretien",
         "zone": "Statue Monument de Taras Chevtchenko",
-        "istit_autonome": 4,
-        "passif_transformateur": 1,
-        "isDiscourse": true
+        "fragment_associe": "M058",
+        "batiment_associe": "MB093"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.3987240697047127,
+          43.56364503845671
+        ]
       }
     },
     {
       "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          1.402583042099991,
-          43.56960618691048
-        ]
-      },
       "properties": {
         "id": "MD004",
         "contenu": "Sur le terrain, factuellement, on a reussi a sauver 100 logements des démolitions: l’immeuble cambert. ",
         "auteur": "Claire Martin",
         "acteur": "Contre la Démolition du Mirail",
         "date": "26/03/2025",
-        "source": "Interview",
+        "source": "Entretien",
         "zone": "Immeuble Cambert",
-        "istit_autonome": 4,
-        "passif_transformateur": 5,
-        "isDiscourse": true
+        "fragment_associe": null,
+        "batiment_associe": [
+          "MB117",
+          "MB211",
+          "MB041"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.402583042099991,
+          43.56960618691048
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD005",
+        "contenu": "Elle exprime qu'elle aime enormement le marché sauvage qui est pour elle un lieu de sociabilite \"on s'asseoit, on parle\". Elle ne veut pas que ca soit démoli, ni déménager, alors elle fait attendre les chalets en leur disant qu'elle ne demenagera pas en hiver. Elle parle de ses autres connaissances sur le quartier qui pour elle sont dans le même cas. ",
+        "auteur": "Fatoumata",
+        "acteur": "Habitante de Poulenc",
+        "date": "20/01/2026",
+        "source": "Porte à porte",
+        "zone": "Marché de Reynerie",
+        "fragment_associe": "M001",
+        "batiment_associe": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.4022817850386673,
+          43.57091342639521
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD006",
+        "contenu": "Elle regrette la démoliton de la Dalle Abbal, de l'asssociation voir et comprendre qui faisait apprendre le francais, elle pense que c'est anormal qu'il n'y ait plus rien sur le quartier.",
+        "auteur": "Fatoumata",
+        "acteur": "Habitante de Poulenc",
+        "date": "21/01/2026",
+        "source": "Porte à porte",
+        "zone": "Dalle Abbal",
+        "fragment_associe": "M167",
+        "batiment_associe": [
+          "MB679",
+          "MB192",
+          "MB110"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.402968341195674,
+          43.57026073418044
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD007",
+        "contenu": "Il témoigne d’une réunion tenue en décembre dans le local de Parle avec elles, en présence de Jean-Luc Moudenc. La discussion porte sur le marché sauvage, que Pierre propose de transformer en un lieu légal, de type marché aux puces. Moudenc affirme qu’il n’y a rien à en conserver et qu’il faut l’éliminer au plus vite. Il regrette qu'ils considèrent cette place comme un espace à « javeliser » et regrette des propos tenus, qu’il juge dépourvus de nuance.",
+        "auteur": "Pierre",
+        "acteur": "Militant CPES",
+        "date": "25/03/2026",
+        "source": "Réunion",
+        "zone": "Marché de Reynerie",
+        "fragment_associe": "M001",
+        "batiment_associe": null
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.4021096525123937,
+          43.5708342677126
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD008",
+        "contenu": "Il témoigne qu’autrefois la CNL était présente dans l’immeuble, avant de se retirer progressivement. Il rappelle aussi qu’un curé y était impliqué et que son action a contribué à l’obtention de plusieurs aménagements. Parmi eux, le jeu pour enfants installé dans la cour de Jean-Gilles, qui répondait à une demande formulée par des parents du quartier.",
+        "auteur": "Marc",
+        "acteur": "Habitant de Jean-Gilles",
+        "date": "27/03/2026",
+        "source": "Bas d'immeuble",
+        "zone": "Jean Gilles",
+        "fragment_associe": null,
+        "batiment_associe": [
+          "MB367",
+          "MB368"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.4020526340622155,
+          43.57238762162723
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD009",
+        "contenu": "Elle rapporte qu’un habitant, épuisé par le manque d’entretien, la saleté et les dégradations, exprimait régulièrement son ras-le-bol face à la situation. Sa femme s’est alors mise à nettoyer elle-même l’ensemble de la coursive du cinquième étage. Elle fait alors la maintenance de la coursive du cinquième étage à la place de Reynerie Services. Il se plaint également de la dégradation de l’entretien depuis la disparition du gardien : selon lui, depuis que Reynerie Services a pris le relais, rien n’est vraiment fait.",
+        "auteur": "Habitante",
+        "acteur": "Habitante de Jean Gilles",
+        "date": "27/03/2026",
+        "source": "Bas d'immeuble",
+        "zone": "Jean Gilles",
+        "fragment_associe": null,
+        "batiment_associe": [
+          "MB367",
+          "MB368"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.4024776389782403,
+          43.57239919748383
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD010",
+        "contenu": "Ils nous éparpillent comme des rats, ils veulent juste nous disperser",
+        "auteur": "Commerçant",
+        "acteur": "Commercant de la Dalle Abbal",
+        "date": "19/06/2026",
+        "source": "Informel",
+        "zone": "Dalle Abbal",
+        "fragment_associe": "M167, M043",
+        "batiment_associe": [
+          "MB679",
+          "MB192",
+          "MB110"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.4026853470630272,
+          43.570092607426176
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD011",
+        "contenu": "Et moi quand je suis arrivé ici, il y a 35 ans que je suis ici. Quand je suis arrivé c'était dans un autre appartement, celui qu'ils ont… C'était Gluck, ils ont démoli la partie là-bas. Et j'étais dans cette partie. Et là je me suis payé une veranda. Et quand ils m'ont déménagé, j'ai dit moi il me faut une veranda. Ils ont mis une équipe qui a fait du très très bon travail. Ils ont mis une veranda démontable.Ce qui fait que j'ai pu la démonter. Mais ils voulaient la garder pour eux. La responsable là qui m'a dit, démonter pas la véranda parce qu'elle est à nous.\r\nC'est eux qui l'avaient installée, mais parce qu'on en avait une.\r",
+        "auteur": "Floréal",
+        "acteur": "Habitant de Jean-Gilles",
+        "date": "01/05/2025",
+        "source": "Entretien",
+        "zone": "Immeuble Gluck",
+        "fragment_associe": "M069",
+        "batiment_associe": "MB201"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.404003824581224,
+          43.569557368370624
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD012",
+        "contenu": "Je m’attends a ce que dans 10 ans on démolisse mon immeuble. Pour l'instant, il a été épargné. Pour l'instant. Ils ont prévu à la démolition le grand, en face de la place. \r\nIls gardent que le petit, parce qu'il n'est pas très haut, peut-être un peu moins haut que l'autre. C'est ce qu'ils veulent, pas faire des trucs trop grands. Ils démolissent tout et ils construisent des petits immeubles collés les uns les autres.\r",
+        "auteur": "Floréal",
+        "acteur": "Habitant de Jean-Gilles",
+        "date": "01/05/2025",
+        "source": "Entretien",
+        "zone": "Reynerie",
+        "fragment_associe": null,
+        "batiment_associe": [
+          "MB367",
+          "MB368"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.404003824581224,
+          43.569557368370624
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD013",
+        "contenu": "Déménagement prévu dans la semaine. Elle quitte un appartement en duplex de 130 m² pour un logement de 80 m² en location. Elle ne voulait pas partir du quartier : elle y vit depuis 35 ans, depuis son arrivée en France. Elle connaît tout, tout le monde. Il y a les commerces, le métro à proximité, les espaces verts. Elle y a fait le mariage de ses filles, dans ses deux salons ici. Son petit-fils de 12 ans est venu récemment, qui a très bien connu ce logement, et il a pleuré en voyant les cartons. Elle sait qu’elle devra jeter une partie de ses affaires, de ses meubles et de ses souvenirs. Elle pleure. Elle dit qu’elle ne sait pas comment en parler.",
+        "auteur": "Habitante de Messager",
+        "acteur": "Habitante de Messager",
+        "date": "29/04/2025",
+        "source": "Porte à porte",
+        "zone": "Immeuble Messager",
+        "fragment_associe": "M171",
+        "batiment_associe": "MB184"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.4068634434615035,
+          43.57180983423959
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD014",
+        "contenu": "Je m’entends pas bien avec les voisins.. ils sont d’accord avec les rénovations. Ils sont “on fait ca pour que ca soit plus joli”, et ils veulent avoir le quartier pour eux. Alors je leur dis, vous allez avoir une route, vous allez avoir du bruit! Ils disent “non on nous a promis qu’il y aurait pas de bruit”. Ils ont cru que les gens qui habitent cette route vont faire le tour de bellefontaine! ",
+        "auteur": "Sylvie",
+        "acteur": "Habitante des Muriers",
+        "date": "07/05/2025",
+        "source": "Entretien",
+        "zone": "Résidence des Muriers",
+        "fragment_associe": null,
+        "batiment_associe": [
+          "MB771",
+          "MB770",
+          "MB815",
+          "MB813",
+          "MB999"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.4030653232614725,
+          43.56266721482476
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD015",
+        "contenu": "« Pourquoi, au centre-ville, les bâtiments fatigués, ils ne les touchent pas, mais ils démolissent ici ? »\n« Pourquoi, au Mirail, ils démolissent ? Ils veulent démolir le Tintoret et, quand j’ai demandé pourquoi, on m’a dit : “ça bloque la vue”. Mais ils veulent voir quoi ? La plage ? »\n« On sait juste que c’est parce qu’ici, on est pauvres. »",
+        "auteur": "Rebecca",
+        "acteur": "Habitante du Tintoret",
+        "date": "29/03/2025",
+        "source": "Réunion",
+        "zone": "Immeuble Tintoret",
+        "fragment_associe": "M163",
+        "batiment_associe": [
+          "MB776",
+          "MB823",
+          "MB743"
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.3990341689965362,
+          43.561454838542716
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD016",
+        "contenu": "Oui, mais sauf qu'il y a une partie qui doit être gardée, c'est la cantine. Et Cyril, de la régie du quartier, il me dit je suis dingue parce qu'on a un super projet, on n'arrive pas à le faire avancer. C'est les mamans et les personnes qui vivent dans le quartier, faire une cantine ou un resto un peu associatif et avec des produits locaux. Ils voulaient optimiser et faire de cet établissement qui va rester, de travailler avec le conseil départemental et de monter quelque chose là-bas.\n",
+        "auteur": "Fatima Bettara",
+        "acteur": "Conseil Citoyen de Bellefontaine",
+        "date": "03/04/2025",
+        "source": "Entretien",
+        "zone": "Collège de Bellefontaine",
+        "fragment_associe": "M054, M011",
+        "batiment_associe": "MB084"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.3990341689965362,
+          43.561454838542716
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD017",
+        "contenu": "J'ai un autre enfant qui, maintenant qu'il vit aux Arènes, j'ai pas réussi à l'attraper sur toute la séance, parce qu'il a été bloqué, parce que son immeuble a été détruit et qu'on le voyait en train d’être démoli du local, donc là, il pouvait plus... il a fait la tête toute la séance. Une espèce de nostalgie terrible. On a parlé un peu, il m'a dit que là, il était triste, parce que, ici, il avait quand même une grande liberté, il pouvait aller au parc tout seul, il retrouvait ses copains et tout, et que maintenant, là où il est aux Arènes, bah, il dit, j'ai pas le droit de descendre, j'ai pas le droit d'aller dans la rue, j'ai pas le droit d'aller dans le parc tout seul, parce que Maman, elle a peur, et, du coup, bah, il est tout le temps tout seul chez lui.",
+        "auteur": "Membre d'association",
+        "acteur": "Association Bas d'Immeubles",
+        "date": "09/05/2025",
+        "source": "Entretien",
+        "zone": "Reynerie",
+        "fragment_associe": "M055, M177",
+        "batiment_associe": "MB201"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.4027945495982692,
+          43.569292064310645
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD018",
+        "contenu": "Moi ça m’a mis en colère. Là-bas, il y avait une sorte de mosquée complètement improvisée, tu vois, mais… Mais du coup, ça a été détruit. Alors, oui, c'est vraiment pas autorisé. Mais bon, ça a été détruit, mais sans prévenir les gens, en fait. Ils avaient mis un barnum, tout a été détruit un matin, mais personne a été prévenu. C'est ça, donc les gens, du coup, ils font la prière sous l'arche, maintenant. Mais je trouve que… Juste par respect pour les gens,\nmême si c'est pas autorisé, même si c'est pas légal, une petite pancarte pour expliquer\nce qui va se passer…\nCa m’a marquée. Ouais, c'est quand même important, même si c'est pas autorisé,\ntoujours pareil, ça reste un lieu de culte, ça reste un endroit de rassemblement, et puis,\nau moins de prévenir les habitants, quoi. Ouais, mais je trouve vraiment que ici, c'est ça qui manque, c'est le respect de l'habitant.\n",
+        "auteur": "Membre d'association",
+        "acteur": "Association Bas d'Immeubles",
+        "date": "09/05/2025",
+        "source": "Entretien",
+        "zone": "Reynerie",
+        "fragment_associe": "M056",
+        "batiment_associe": "MB680"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.404366580334937,
+          43.57004782704004
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD019",
+        "contenu": "Ça a commencé [la lutte] quand ils ont\r\ndémoli le morceau du bâtiment de Gluck. Ok,\r\noui. C’était ça l’élément déclencheur, le\r\ndébut d’une réflexion, de discussion. Avec\r\nle fait que quelques voisins, quelques\r\nhabitants, des personnes n’aient rien dit\r\nparmi les habitants. On s’est aperçu que ça\r\nallait tomber quand le bâtiment était\r\nquasiment vide. Ça s’était fait comme ça,\r\nles gens étaient partis.",
+        "auteur": "Jean Pierre Siksik",
+        "acteur": "Habitants de la Reynerie",
+        "date": "27/03/2025",
+        "source": "Entretien",
+        "zone": "Reynerie",
+        "fragment_associe": "M055, M177",
+        "batiment_associe": "MB201"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.403927716218277,
+          43.56932485429496
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "MD020",
+        "contenu": "Il y a un phénomène qui se passe au Mirail qui est assez intéressant : c'est l'histoire des jardins de bas d’immeubles. Ça, c'est intéressant. Parce qu'il y a toujours le même schéma : chaque immeuble a son jardin. Et là, il y a une rencontre possible avec les gens. Parce que, finalement, ils s’y retrouvent.\r\nEt ce sont des endroits qui ne sont pas pillés du tout, parce que leurs frangins sont là, leurs parents sont là. Ce n’est pas touché. C’est quand même étonnant de voir que les gens laissent du matériel, mais ce n’est pas cassé, ce n’est pas envahi. Ce sont des portillons ouverts, et pourtant, ce n’est pas touché, pas vandalisé. Il y a un respect. Ça, c'est assez intéressant.",
+        "auteur": "Hervé Dangla ",
+        "acteur": "Association",
+        "date": "25/03/2025",
+        "source": "Entretien",
+        "zone": "Jardins partagés Reynerie",
+        "fragment_associe": "M014, M015",
+        "batiment_associe": "MB685"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          1.405470022200177,
+          43.56770216775814
+        ]
       }
     }
   ]

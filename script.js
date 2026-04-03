@@ -213,6 +213,14 @@ let datamGeojson = [];
 let batimentsMontreuilGeojson = [];
 let batimentsToulouseGeojson = [];
 
+let discoursGeojson = [];
+
+let SHOW_DISCOURSES = true;
+
+let discourseById = new Map();
+let discourseByFragmentId = new Map();
+let discourseByBuildingId = new Map();
+
 /* temporalités */
 
 let dataGeojsonT1 = [];
@@ -1735,7 +1743,9 @@ function closeSidebars() {
 ================================================== */
 
 function applyFilters() {
-  const showDiscourses = true;
+  const toggleDiscoursesEl = document.getElementById('toggle-discourses');
+  SHOW_DISCOURSES = toggleDiscoursesEl ? toggleDiscoursesEl.checked : true;
+
   const activeZones = getActiveZones();
 
   allLayers.forEach(layer => {
@@ -1745,7 +1755,9 @@ function applyFilters() {
 
     if (!isDiscourse && !isBuilding) return;
 
-    const showLayer = isDiscourse ? showDiscourses : activeZones.includes(layer.zone);
+    const showLayer = isDiscourse
+  ? SHOW_DISCOURSES
+  : activeZones.includes(layer.zone);
 
     if (showLayer) {
       if (!map.hasLayer(layer)) layer.addTo(map);
@@ -2580,27 +2592,54 @@ Promise.all([
 fetch('data/discours.geojson')
   .then(res => res.json())
   .then(data => {
-    discoursLayer = L.geoJSON(data, {
-      pane: 'pane-discours',
-      pointToLayer: (feature, latlng) => {
-        const visible = L.circleMarker(latlng, {
-          radius: 5, fillColor: 'white', color: 'white', weight: 1, opacity: 1, fillOpacity: 0.8, pane: 'pane-discours'
-        });
-        const clickableArea = L.circle(latlng, {
-          radius: 30, color: 'transparent', fillColor: 'transparent', weight: 0, fillOpacity: 0, pane: 'pane-discours'
-        });
-        clickableArea.on('click', () => showDetails(feature.properties));
-        visible.on('click', () => showDetails(feature.properties));
-        return L.layerGroup([clickableArea, visible]);
-      },
-      onEachFeature: (feature, layerGroup) => {
-        allLayers.push(layerGroup);
-        layerGroup.feature = feature;
-      }
+    discoursGeojson = (data && data.features) ? data.features : [];
+
+    discoursGeojson.forEach(f => {
+      f.properties = f.properties || {};
+      f.properties.isDiscourse = true;
     });
 
+    buildDiscourseIndexes(discoursGeojson);
+
+    discoursLayer = L.geoJSON(
+      { type: 'FeatureCollection', features: discoursGeojson },
+      {
+        pane: 'pane-discours',
+        pointToLayer: (feature, latlng) => {
+          const visible = L.circleMarker(latlng, {
+            radius: 5,
+            fillColor: 'white',
+            color: 'white',
+            weight: 1,
+            opacity: 1,
+            fillOpacity: 0.8,
+            pane: 'pane-discours'
+          });
+
+          const clickableArea = L.circle(latlng, {
+            radius: 30,
+            color: 'transparent',
+            fillColor: 'transparent',
+            weight: 0,
+            fillOpacity: 0,
+            pane: 'pane-discours'
+          });
+
+          clickableArea.on('click', () => openDiscourseFromFeature(feature));
+          visible.on('click', () => openDiscourseFromFeature(feature));
+
+          return L.layerGroup([clickableArea, visible]);
+        },
+        onEachFeature: (feature, layerGroup) => {
+          layerGroup.feature = feature;
+          layerGroup.zone = feature.properties?.zone || null;
+          allLayers.push(layerGroup);
+        }
+      }
+    );
+
     discoursLayer.addTo(map);
-    applyFilters(); // pour respecter l’état des checkboxes
+    applyFilters();
   });
 
 
@@ -2862,6 +2901,117 @@ function appendMetaBox(panel, title, items, emptyText) {
   panel.appendChild(box);
 }
 
+function parseAssociatedIds(str) {
+  if (!str || str === '-') return [];
+
+  return String(str)
+    .split(/[;,]/)
+    .map(s => String(s || '').trim().toUpperCase())
+    .filter(Boolean);
+}
+
+function addToMapArray(map, key, value) {
+  if (!key) return;
+  if (!map.has(key)) map.set(key, []);
+  map.get(key).push(value);
+}
+
+function buildDiscourseIndexes(features) {
+  discourseById = new Map();
+  discourseByFragmentId = new Map();
+  discourseByBuildingId = new Map();
+
+  (features || []).forEach(feature => {
+    const props = feature?.properties || {};
+    const id = String(props.id || '').trim().toUpperCase();
+
+    if (id) {
+      discourseById.set(id, feature);
+    }
+
+    const fragIds = parseAssociatedIds(props.fragment_associe);
+    fragIds.forEach(fid => addToMapArray(discourseByFragmentId, fid, feature));
+
+    const buildingIds = parseAssociatedIds(props.batiment_associe);
+    buildingIds.forEach(bid => addToMapArray(discourseByBuildingId, bid, feature));
+  });
+}
+
+function getDiscoursesForFragment(fragmentId) {
+  const id = String(fragmentId || '').trim().toUpperCase();
+  return discourseByFragmentId.get(id) || [];
+}
+
+function getDiscoursesForBuilding(buildingId) {
+  const id = String(buildingId || '').trim().toUpperCase();
+  return discourseByBuildingId.get(id) || [];
+}
+
+function getDiscoursesForPatternOccurrences(occs) {
+  const discourseMap = new Map();
+
+  (occs || []).forEach(ag => {
+    (ag.fragmentIds || []).forEach(fid => {
+      const linked = getDiscoursesForFragment(fid);
+      linked.forEach(feature => {
+        const did = String(feature?.properties?.id || '').trim().toUpperCase();
+        if (did) discourseMap.set(did, feature);
+      });
+    });
+
+    (ag.buildingIds || []).forEach(bid => {
+      const linked = getDiscoursesForBuilding(bid);
+      linked.forEach(feature => {
+        const did = String(feature?.properties?.id || '').trim().toUpperCase();
+        if (did) discourseMap.set(did, feature);
+      });
+    });
+  });
+
+  return Array.from(discourseMap.values()).sort((a, b) => {
+    const aId = String(a?.properties?.id || '');
+    const bId = String(b?.properties?.id || '');
+    return aId.localeCompare(bId, undefined, { numeric: true });
+  });
+}
+
+function openDiscourseFromFeature(feature) {
+  if (!feature || !feature.properties) return;
+
+  const props = {
+    ...feature.properties,
+    isDiscourse: true
+  };
+
+  showDetails(props);
+}
+
+function makeClickableFragmentLink(fragmentId) {
+  const btn = document.createElement('button');
+  btn.className = 'tab-btn btn-xs';
+  btn.textContent = fragmentId;
+
+  btn.addEventListener('click', () => {
+    const allFrags = [
+      ...(dataGeojsonT1 || []),
+      ...(dataGeojsonT2 || []),
+      ...(datamGeojsonT1 || []),
+      ...(datamGeojsonT2 || [])
+    ];
+
+    const frag = allFrags.find(f => {
+      const fid = String(f?.properties?.id || '').trim().toUpperCase();
+      return fid === String(fragmentId || '').trim().toUpperCase();
+    });
+
+    if (!frag) return;
+
+    showDetails(frag.properties);
+  });
+
+  return btn;
+}
+
 /*==================================================
    PANNEAU BATIMENTS
 ==================================================*/
@@ -2877,12 +3027,55 @@ function renderBuildingPanel(panel, props) {
   const pFonction = document.createElement('p');
   pFonction.innerHTML = `<strong>Fonction :</strong> ${props.fonction || '—'}`;
 
-  // Attention : dans ton GeoJSON tu as "état" avec accent
   const etat = props['état'] || props.etat || '—';
   const pEtat = document.createElement('p');
   pEtat.innerHTML = `<strong>État :</strong> ${etat}`;
 
   panel.append(h2, pId, pFonction, pEtat);
+
+  const buildingId = props.id || '';
+  const linkedDiscourses = getDiscoursesForBuilding(buildingId);
+
+  if (linkedDiscourses.length) {
+    const discourseBox = document.createElement('div');
+    discourseBox.className = 'meta-box';
+
+    const discourseHead = document.createElement('div');
+    discourseHead.className = 'meta-head';
+    discourseHead.innerHTML = `<strong>Discours associé</strong>`;
+    discourseBox.appendChild(discourseHead);
+
+    const discourseList = document.createElement('div');
+    discourseList.className = 'meta-list';
+
+    linkedDiscourses.forEach(feature => {
+      const dProps = feature.properties || {};
+
+      const row = document.createElement('div');
+      row.className = 'meta-item';
+      row.style.cursor = 'pointer';
+
+      const txt = document.createElement('div');
+      txt.className = 'meta-item-text';
+      txt.innerHTML = `
+        <strong>${dProps.id || 'Discours'}</strong><br>
+        ${dProps.auteur || '—'} — ${dProps.source || '—'}
+      `;
+
+      row.appendChild(txt);
+
+      row.addEventListener('click', () => {
+        openDiscourseFromFeature(feature);
+      });
+
+      discourseList.appendChild(row);
+    });
+
+    discourseBox.appendChild(discourseList);
+    panel.appendChild(discourseBox);
+  } else {
+    appendMetaBox(panel, "Discours associé", [], "— Aucun discours associé.");
+  }
 }
 
 /*==================================================
@@ -2962,6 +3155,48 @@ appendMetaBox(panel, "Acteurs actifs", existingActeurs, "— Aucun acteur actif 
 appendMetaBox(panel, "Usages issus du terrain", existingUsages, "— Aucun usage renseigné dans le GeoJSON.");
 appendMetaBox(panel, "Éléments spatiaux", existingElementsSpatiaux, "— Aucun élément spatial renseigné dans le GeoJSON.");
 
+const linkedDiscourses = getDiscoursesForFragment(fragId);
+
+if (linkedDiscourses.length) {
+  const discourseBox = document.createElement('div');
+  discourseBox.className = 'meta-box';
+
+  const discourseHead = document.createElement('div');
+  discourseHead.className = 'meta-head';
+  discourseHead.innerHTML = `<strong>Discours associé</strong>`;
+  discourseBox.appendChild(discourseHead);
+
+  const discourseList = document.createElement('div');
+  discourseList.className = 'meta-list';
+
+  linkedDiscourses.forEach(feature => {
+    const dProps = feature.properties || {};
+
+    const row = document.createElement('div');
+    row.className = 'meta-item';
+    row.style.cursor = 'pointer';
+
+    const txt = document.createElement('div');
+    txt.className = 'meta-item-text';
+    txt.innerHTML = `
+      <strong>${dProps.id || 'Discours'}</strong><br>
+      ${dProps.auteur || '—'} — ${dProps.source || '—'}
+    `;
+
+    row.appendChild(txt);
+
+    row.addEventListener('click', () => {
+      openDiscourseFromFeature(feature);
+    });
+
+    discourseList.appendChild(row);
+  });
+
+  discourseBox.appendChild(discourseList);
+  panel.appendChild(discourseBox);
+} else {
+  appendMetaBox(panel, "Discours associé", [], "— Aucun discours associé.");
+}
 
   /* ======================================================
      2) USAGES ajoutés localement par l’utilisateur
@@ -3414,6 +3649,50 @@ panel.appendChild(temporalBox);
   });
 
   panel.appendChild(list);
+
+
+  const linkedDiscourses = getDiscoursesForPatternOccurrences(occs);
+
+if (linkedDiscourses.length) {
+  const discourseBox = document.createElement('div');
+  discourseBox.className = 'meta-box';
+
+  const discourseHead = document.createElement('div');
+  discourseHead.className = 'meta-head';
+  discourseHead.innerHTML = `<strong>Discours associés</strong>`;
+  discourseBox.appendChild(discourseHead);
+
+  const discourseList = document.createElement('div');
+  discourseList.className = 'meta-list';
+
+  linkedDiscourses.forEach(feature => {
+    const dProps = feature.properties || {};
+
+    const row = document.createElement('div');
+    row.className = 'meta-item';
+    row.style.cursor = 'pointer';
+
+    const txt = document.createElement('div');
+    txt.className = 'meta-item-text';
+    txt.innerHTML = `
+      <strong>${dProps.id || 'Discours'}</strong><br>
+      ${dProps.auteur || '—'} — ${dProps.source || '—'}
+    `;
+
+    row.appendChild(txt);
+
+    row.addEventListener('click', () => {
+      openDiscourseFromFeature(feature);
+    });
+
+    discourseList.appendChild(row);
+  });
+
+  discourseBox.appendChild(discourseList);
+  panel.appendChild(discourseBox);
+} else {
+  appendMetaBox(panel, "Discours associés", [], "— Aucun discours associé.");
+}
 
   const actions = document.createElement('div');
   actions.className = 'btn-row';
@@ -3890,14 +4169,141 @@ panel.appendChild(temporalBox);
 ==================================================*/
 function renderDiscoursePanel(panel, props) {
   panel.innerHTML = '';
-  const h2 = document.createElement('h2'); h2.textContent = props.id || 'Discours';
-  const pA = document.createElement('p'); pA.innerHTML = `<strong>Auteur :</strong> ${props.auteur || ''}`;
-  const pD = document.createElement('p'); pD.innerHTML = `<strong>Date :</strong> ${props.date || ''}`;
+
+  const h2 = document.createElement('h2');
+  h2.textContent = props.id || 'Discours';
+
+  const pA = document.createElement('p');
+  pA.innerHTML = `<strong>Auteur :</strong> ${props.auteur || '—'}`;
+
+  const pActeur = document.createElement('p');
+  pActeur.innerHTML = `<strong>Acteur :</strong> ${props.acteur || '—'}`;
+
+  const pD = document.createElement('p');
+  pD.innerHTML = `<strong>Date :</strong> ${props.date || '—'}`;
+
+  const pZone = document.createElement('p');
+  pZone.innerHTML = `<strong>Zone :</strong> ${props.zone || '—'}`;
+
   const pS = document.createElement('p');
   const src = props.source || '';
-  pS.innerHTML = `<strong>Source :</strong> ${ src && String(src).startsWith('http') ? `<a href="${src}" target="_blank">${src}</a>` : src }`;
-  const pT = document.createElement('p'); pT.textContent = props.contenu || '';
-  panel.append(h2, pA, pD, pS, pT);
+  pS.innerHTML = `<strong>Source :</strong> ${
+    src && String(src).startsWith('http')
+      ? `<a href="${src}" target="_blank">${src}</a>`
+      : src || '—'
+  }`;
+
+  const pT = document.createElement('p');
+  pT.textContent = props.contenu || '';
+
+  panel.append(h2, pA, pActeur, pD, pZone, pS, pT);
+
+  const fragIds = parseAssociatedIds(props.fragment_associe);
+  const batIds = parseAssociatedIds(props.batiment_associe);
+
+
+const assocBox = document.createElement('div');
+assocBox.className = 'meta-box';
+
+const assocHead = document.createElement('div');
+assocHead.className = 'meta-head';
+assocHead.innerHTML = `<strong>Fragments associés</strong>`;
+assocBox.appendChild(assocHead);
+
+const assocList = document.createElement('div');
+assocList.className = 'meta-list';
+
+if (fragIds.length) {
+  const allFrags = [
+    ...(dataGeojsonT1 || []),
+    ...(dataGeojsonT2 || []),
+    ...(datamGeojsonT1 || []),
+    ...(datamGeojsonT2 || [])
+  ];
+
+  fragIds.forEach(fid => {
+    const frag = allFrags.find(f => {
+      const currentId = String(f?.properties?.id || '').trim().toUpperCase();
+      return currentId === fid;
+    });
+
+    const row = document.createElement('div');
+    row.className = 'member-row';
+    row.style.cursor = 'pointer';
+
+    const thumb = document.createElement('div');
+    thumb.className = 'member-thumb';
+
+    const photoUrl = frag ? normalizePhotos(frag.properties?.photos)[0] : null;
+    if (photoUrl) {
+      thumb.style.backgroundImage = `url("${photoUrl}")`;
+    }
+
+    const right = document.createElement('div');
+    right.className = 'member-right';
+
+    const title = document.createElement('div');
+    title.className = 'member-title';
+    title.textContent = frag?.properties?.name || fid;
+
+    const info = document.createElement('div');
+    info.className = 'member-info';
+    info.textContent = fid;
+
+    right.append(title, info);
+    row.append(thumb, right);
+
+    row.addEventListener('click', () => {
+      if (frag?.properties) {
+        showDetails(frag.properties);
+      }
+    });
+
+    assocList.appendChild(row);
+  });
+} else {
+  const empty = document.createElement('div');
+  empty.className = 'meta-empty';
+  empty.textContent = '— Aucun fragment associé.';
+  assocList.appendChild(empty);
+}
+
+assocBox.appendChild(assocList);
+panel.appendChild(assocBox);
+
+
+  const batBox = document.createElement('div');
+  batBox.className = 'meta-box';
+
+  const batHead = document.createElement('div');
+  batHead.className = 'meta-head';
+  batHead.innerHTML = `<strong>Bâtiments associés</strong>`;
+  batBox.appendChild(batHead);
+
+  const batList = document.createElement('div');
+  batList.className = 'meta-list';
+
+  if (batIds.length) {
+    batIds.forEach(bid => {
+      const row = document.createElement('div');
+      row.className = 'meta-item';
+
+      const txt = document.createElement('div');
+      txt.className = 'meta-item-text';
+      txt.textContent = bid;
+
+      row.appendChild(txt);
+      batList.appendChild(row);
+    });
+  } else {
+    const empty = document.createElement('div');
+    empty.className = 'meta-empty';
+    empty.textContent = '— Aucun bâtiment associé.';
+    batList.appendChild(empty);
+  }
+
+  batBox.appendChild(batList);
+  panel.appendChild(batBox);
 }
 
 
@@ -4099,6 +4505,65 @@ function buildGalleryBuildingsCell(ag, byBldId) {
   return cell;
 }
 
+function buildGalleryDiscoursesCell(ag) {
+  const cell = document.createElement('div');
+  cell.className = 'gallery-buildings-cell';
+
+  const title = document.createElement('div');
+  title.className = 'gallery-buildings-title';
+  title.textContent = 'Discours associés';
+
+  const list = document.createElement('div');
+  list.className = 'gallery-buildings-list';
+
+  const discourseMap = new Map();
+
+  (ag?.fragmentIds || []).forEach(fid => {
+    getDiscoursesForFragment(fid).forEach(feature => {
+      const did = String(feature?.properties?.id || '').trim().toUpperCase();
+      if (did) discourseMap.set(did, feature);
+    });
+  });
+
+  (ag?.buildingIds || []).forEach(bid => {
+    getDiscoursesForBuilding(bid).forEach(feature => {
+      const did = String(feature?.properties?.id || '').trim().toUpperCase();
+      if (did) discourseMap.set(did, feature);
+    });
+  });
+
+  const discourses = Array.from(discourseMap.values()).sort((a, b) => {
+    const aId = String(a?.properties?.id || '');
+    const bId = String(b?.properties?.id || '');
+    return aId.localeCompare(bId, undefined, { numeric: true });
+  });
+
+  if (!discourses.length) {
+    const empty = document.createElement('div');
+    empty.className = 'gallery-building-line is-empty';
+    empty.textContent = '— Aucun discours';
+    list.appendChild(empty);
+  } else {
+    discourses.forEach(feature => {
+      const props = feature?.properties || {};
+
+      const line = document.createElement('div');
+      line.className = 'gallery-building-line';
+      line.style.cursor = 'pointer';
+      line.textContent = `${props.id || '—'} — ${props.auteur || '—'} — ${props.source || '—'}`;
+
+      line.addEventListener('click', () => {
+        openDiscourseFromFeature(feature);
+      });
+
+      list.appendChild(line);
+    });
+  }
+
+  cell.append(title, list);
+  return cell;
+}
+
 function getFragmentSimilarityScore(fa, fb) {
   if (!fa || !fb) return -1;
   const va = featureToVector(fa);
@@ -4285,6 +4750,20 @@ occs.forEach(ag => {
 });
 
 table.appendChild(buildingsRow);
+
+// Ligne discours
+const discoursesRow = document.createElement('div');
+discoursesRow.className = 'gallery-buildings-row';
+discoursesRow.style.gridTemplateColumns = colTemplate;
+
+occs.forEach(ag => {
+  const dCellWrap = document.createElement('div');
+  dCellWrap.className = 'gallery-buildings-wrap';
+  dCellWrap.appendChild(buildGalleryDiscoursesCell(ag));
+  discoursesRow.appendChild(dCellWrap);
+});
+
+table.appendChild(discoursesRow);
 
     block.append(title, table);
     wrapper.appendChild(block);
@@ -6625,6 +7104,7 @@ function promptImport3DForUnit(unitId, onLoaded) {
 function updateInterfaceElements(viewId) {
   const legendBtn   = document.getElementById('toggle-legend-btn');
   const locationBtn = document.getElementById('toggle-location-btn');
+  const discoursesToggleBox = document.getElementById('discourses-toggle-box');
 
 
 const diffToggleBtn = document.getElementById('toggle-diffractions-btn');
@@ -6636,6 +7116,13 @@ if (diffToggleBtn) diffToggleBtn.style.display = (viewId === 'proxemic') ? 'bloc
   if (buildingsBox) {
     buildingsBox.style.display = (viewId === 'map') ? 'block' : 'none';
   }
+
+  if (discoursesToggleBox) {
+  const showDiscoursesToggle =
+    viewId === 'map' || viewId === 'fragment-proxemic';
+
+  discoursesToggleBox.style.display = showDiscoursesToggle ? 'block' : 'none';
+}
 
   // ✅ bouton "Critères actifs" visible sur : Carte (patterns-map), Proxémie, Galerie
 const wantsLegend =
@@ -7168,32 +7655,186 @@ function fmtDate(iso){
 
 
 /*==================================================
+=           SAVED PATTERNS (localStorage)          =
+==================================================*/
+
+function loadSavedPatterns() {
+  try {
+    return JSON.parse(localStorage.getItem(SAVED_PATTERNS_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveSavedPatterns(arr) {
+  localStorage.setItem(SAVED_PATTERNS_KEY, JSON.stringify(arr));
+}
+
+function addSavedPattern(rec) {
+  const arr = loadSavedPatterns();
+  arr.push(rec);
+  saveSavedPatterns(arr);
+}
+
+function updateSavedPattern(uid, patch) {
+  const arr = loadSavedPatterns();
+  const i = arr.findIndex(x => x.uid === uid);
+
+  if (i >= 0) {
+    arr[i] = {
+      ...arr[i],
+      ...patch,
+      updatedAt: new Date().toISOString()
+    };
+    saveSavedPatterns(arr);
+  }
+}
+
+function deleteSavedPattern(uid) {
+  saveSavedPatterns(loadSavedPatterns().filter(x => x.uid !== uid));
+}
+
+function fmtDate(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString();
+  } catch (e) {
+    return iso || '';
+  }
+}
+
+/*==================================================
+=              HELPERS SAVED PATTERNS             =
+==================================================*/
+
+function cloneDeep(obj) {
+  try {
+    return JSON.parse(JSON.stringify(obj));
+  } catch (e) {
+    return obj;
+  }
+}
+
+function getAllCurrentFragmentsMap() {
+  const all = [...(dataGeojson || []), ...(datamGeojson || [])]
+    .filter(f => !f?.properties?.isDiscourse && !f?.properties?.isBuilding);
+
+  return new Map(
+    all.map(f => [String(f.properties?.id || '').trim(), f])
+  );
+}
+
+function getAllCurrentBuildingsMap() {
+  const all = [...(batimentsMontreuilGeojson || []), ...(batimentsToulouseGeojson || [])];
+
+  return new Map(
+    all.map(b => [String(b.properties?.id || '').trim(), b])
+  );
+}
+
+function serializeAgencementSnapshot(ag) {
+  if (!ag) return null;
+
+  return {
+    id: ag.id,
+    center: ag.center ? { lat: ag.center.lat, lng: ag.center.lng } : null,
+    radiusM: ag.radiusM ?? null,
+    fragmentIds: (ag.fragmentIds || []).slice(),
+    buildingIds: (ag.buildingIds || []).slice(),
+    fragmentsCount: ag.fragmentsCount ?? 0,
+    buildingsCount: ag.buildingsCount ?? 0,
+    patternIds: (ag.patternIds || []).slice(),
+    temporalProfiles: cloneDeep(ag.temporalProfiles || []),
+    fragmentsAgg: cloneDeep(ag.fragmentsAgg || {}),
+    buildingsAgg: cloneDeep(ag.buildingsAgg || {})
+  };
+}
+
+function deserializeSavedAgencement(raw) {
+  if (!raw) return null;
+
+  return {
+    ...raw,
+    center: raw.center ? L.latLng(raw.center.lat, raw.center.lng) : null,
+    fragmentIds: (raw.fragmentIds || []).slice(),
+    buildingIds: (raw.buildingIds || []).slice(),
+    patternIds: (raw.patternIds || []).slice(),
+    temporalProfiles: cloneDeep(raw.temporalProfiles || []),
+    fragmentsAgg: cloneDeep(raw.fragmentsAgg || {}),
+    buildingsAgg: cloneDeep(raw.buildingsAgg || {})
+  };
+}
+
+function getSavedPatternOccurrencesResolved(rec) {
+  const savedOccs = (rec?.savedOccurrences || [])
+    .map(deserializeSavedAgencement)
+    .filter(Boolean);
+
+  if (savedOccs.length) {
+    return savedOccs.sort((a, b) => {
+      return parseInt(String(a.id).replace('A', ''), 10) - parseInt(String(b.id).replace('A', ''), 10);
+    });
+  }
+
+  const liveOccs = (rec?.occurrences || [])
+    .map(id => agencementsById.get(id))
+    .filter(Boolean)
+    .map(ag => deserializeSavedAgencement(serializeAgencementSnapshot(ag)));
+
+  return liveOccs.sort((a, b) => {
+    return parseInt(String(a.id).replace('A', ''), 10) - parseInt(String(b.id).replace('A', ''), 10);
+  });
+}
+
+function buildSavedPatternSignatureFromOccurrences(occs) {
+  const signature = computePatternSignatureFromOccurrences(occs);
+
+  return {
+    numericMeans: signature.numericMeans || {},
+    numericSpread: signature.numericSpread || {},
+    textTokens: signature.textTokens || {},
+    dominantPoleShares: signature.dominantPoleShares || { PA: 0, DH: 0, FS: 0 },
+    internalContrast: signature.internalContrast || 0,
+    temporalStatusCounts: signature.temporalStatusCounts || {
+      stable: 0,
+      modified: 0,
+      appeared: 0,
+      disappeared: 0
+    }
+  };
+}
+
+function buildSavedPatternElementsFromOccurrences(occs) {
+  return Array.from(new Set(
+    (occs || []).flatMap(ag => (ag.fragmentIds || []).map(id => String(id).trim()))
+  ));
+}
+
+/*==================================================
 =   ÉDITEUR DE PATTERN (création ET modification)  =
 ==================================================*/
 
-/**
- * Ouvre la même fenêtre modale que la création, mais en mode:
- *  - "create"  : on enregistre un NOUVEAU snapshot (addSavedPattern)
- *  - "edit"    : on modifie un snapshot existant (updateSavedPattern)
- *
- * options = {
- *   mode: 'create' | 'edit',
- *   patternKey,                // string (clé P1, P7…)
- *   elements: string[],        // ids des membres
- *   criteria: object,          // critères du snapshot
- *   name: string,              // nom initial (pré-rempli)
- *   description: string,       // desc initiale (pré-remplie)
- *   onSave: (payload) => void, // callback appelé quand on confirme
- *   headerText?: string,       // (facultatif) titre personnalisé
- *   saveText?: string          // (facultatif) libellé bouton
- * }
- */
+function closeSavePatternModal() {
+  const modal = document.getElementById('save-pattern-modal');
+  if (!modal) return;
+
+  const btnSave = document.getElementById('sp-save');
+  const btnCancel = document.getElementById('sp-cancel');
+  const backdrop = document.querySelector('#save-pattern-modal .modal__backdrop');
+
+  if (btnSave) btnSave.onclick = null;
+  if (btnCancel) btnCancel.onclick = null;
+  if (backdrop) backdrop.onclick = null;
+
+  modal.style.display = 'none';
+}
+
 function openPatternEditor(options) {
   const {
     mode = 'create',
     patternKey = '',
+    occurrences = [],
     elements = [],
-    criteria = {},          // ⇐ maintenant on passe des critères fuzzy
     name = patternKey,
     description = '',
     onSave = () => {},
@@ -7201,51 +7842,74 @@ function openPatternEditor(options) {
     saveText
   } = options || {};
 
-  const modal   = document.getElementById('save-pattern-modal');
+  const modal = document.getElementById('save-pattern-modal');
   modal.style.zIndex = '6000';
   document.body.appendChild(modal);
 
-  const keyEl   = document.getElementById('sp-key');
-  const nameEl  = document.getElementById('sp-name');
-  const descEl  = document.getElementById('sp-desc');
-  const listEl  = document.getElementById('sp-fragments');
+  const keyEl = document.getElementById('sp-key');
+  const nameEl = document.getElementById('sp-name');
+  const descEl = document.getElementById('sp-desc');
+  const listEl = document.getElementById('sp-fragments');
   const countEl = document.getElementById('sp-frag-count');
-  const btnSave   = document.getElementById('sp-save');
+  const btnSave = document.getElementById('sp-save');
   const btnCancel = document.getElementById('sp-cancel');
-
-  // Titre & labels
+  const backdrop = document.querySelector('#save-pattern-modal .modal__backdrop');
   const headTitle = modal.querySelector('.modal__head strong');
-  headTitle.textContent = headerText || (mode === 'edit' ? 'Modifier ce pattern' : 'Enregistrer ce pattern');
-  btnSave.textContent   = saveText   || (mode === 'edit' ? 'Enregistrer les modifications' : 'Enregistrer');
 
-  // Champs
-  keyEl.value   = patternKey;
-  nameEl.value  = (name || patternKey).trim();
-  descEl.value  = description || '';
+  const byFragId = getAllCurrentFragmentsMap();
 
-  // Liste des fragments membres
+  headTitle.textContent = headerText || (
+    mode === 'edit' ? 'Modifier ce pattern enregistré' : 'Enregistrer ce pattern'
+  );
+  btnSave.textContent = saveText || (
+    mode === 'edit' ? 'Enregistrer les modifications' : 'Enregistrer'
+  );
+
+  keyEl.value = patternKey;
+  nameEl.value = (name || patternKey).trim();
+  descEl.value = description || '';
+
   countEl.textContent = String(elements.length);
-  const all = [...(dataGeojson || []), ...(datamGeojson || [])];
-  const byId = new Map(all.map(f => [f.properties.id, f]));
   listEl.innerHTML = '';
-  elements.forEach(id => {
-    const f = byId.get(id);
-    const line = document.createElement('div');
-    line.textContent = `${id}${f?.properties?.name ? ' — ' + f.properties.name : ''}`;
-    listEl.appendChild(line);
+
+  const summary = document.createElement('div');
+  summary.style.cssText = 'margin-bottom:10px;color:#ccc;';
+  summary.textContent = `${occurrences.length} agencement(s) • ${elements.length} fragment(s)`;
+  listEl.appendChild(summary);
+
+  occurrences.forEach(ag => {
+    const box = document.createElement('div');
+    box.style.cssText = `
+      border:1px solid #333;
+      border-radius:4px;
+      padding:8px;
+      margin-bottom:8px;
+      background:#111;
+      color:#fff;
+    `;
+
+    const title = document.createElement('div');
+    title.style.fontWeight = '600';
+    title.textContent = `${ag.id} — ${ag.fragmentsCount || 0} fragments • ${ag.buildingsCount || 0} bâtiments`;
+
+    const fragLine = document.createElement('div');
+    fragLine.style.cssText = 'margin-top:4px;color:#aaa;font-size:12px;';
+    fragLine.textContent = (ag.fragmentIds || [])
+      .map(fid => {
+        const f = byFragId.get(String(fid).trim());
+        return f ? `${fid} — ${f.properties?.name || ''}` : fid;
+      })
+      .join(' • ');
+
+    box.append(title, fragLine);
+    listEl.appendChild(box);
   });
 
   function close() {
-    modal.style.display = 'none';
-    cleanup();
-  }
-  function cleanup() {
-    document.querySelector('#save-pattern-modal .modal__backdrop').onclick = null;
-    btnCancel.onclick = null;
-    btnSave.onclick = null;
+    closeSavePatternModal();
   }
 
-  document.querySelector('#save-pattern-modal .modal__backdrop').onclick = close;
+  backdrop.onclick = close;
   btnCancel.onclick = close;
 
   btnSave.onclick = () => {
@@ -7253,152 +7917,106 @@ function openPatternEditor(options) {
       patternKey,
       name: (nameEl.value || patternKey).trim(),
       description: (descEl.value || '').trim(),
-      elements: elements.slice(),
-      criteria: criteria   // ⇐ on renvoie bien les critères fuzzy
+      occurrences: occurrences.map(serializeAgencementSnapshot),
+      elements: elements.slice()
     };
-    onSave(payload);
+
+    // IMPORTANT :
+    // on ferme d'abord la modale pour éviter le bug où elle reste affichée
     close();
+
+    // puis on ouvre/actualise la sidebar
+    onSave(payload);
   };
 
   modal.style.display = 'block';
 }
 
-/**
- * Calcule des critères "moyens" fuzzy pour une liste d'IDs de fragments.
- * Retourne un objet { cléFuzzy: valeurMoyenne } avec des nombres entre 0 et 1.
- */
-function computeConsensusCriteriaForIds(ids) {
-  const all = [...(dataGeojson || []), ...(datamGeojson || [])];
-  const byId = new Map(all.map(f => [f.properties.id, f]));
-
-  const consensus = {};
-
-  ALL_FUZZY_KEYS.forEach((key, idx) => {
-    let sum = 0;
-    let count = 0;
-
-    ids.forEach(id => {
-      const f = byId.get(id);
-      if (!f) return;
-      const v = parseFuzzy(f.properties[key]);
-      if (v === null || Number.isNaN(v)) return;
-      sum += v;
-      count++;
-    });
-
-    if (count > 0) {
-      consensus[key] = sum / count;  // moyenne fuzzy
-    }
-  });
-
-  return consensus;
-}
-
-function computeTextConsensusForIds(ids, key, byIdFeatureMap, { minRatio = 1 } = {}) {
-  // minRatio=1 => strictement commun à TOUS les fragments du pattern
-  // (tu peux repasser à 0.7 plus tard si tu veux du "quasi commun")
-
-  const counts = new Map();
-
-  // IMPORTANT : on se base sur le nombre total de fragments du pattern
-  const total = ids.length;
-  if (!total) return [];
-
-  // Si un fragment n'a pas de valeur -> pas de consensus (car pas comparable)
-  for (const id of ids) {
-    const f = byIdFeatureMap.get(id);
-    if (!f) return [];
-    const arr = parseMultiText(f.properties?.[key]); // Array<string> | null
-    if (!arr || !arr.length) return [];             // <-- clé: bloque le consensus
-
-    const uniq = new Set(arr);
-    uniq.forEach(tok => counts.set(tok, (counts.get(tok) || 0) + 1));
-  }
-
-  const threshold = Math.max(1, Math.ceil(total * minRatio));
-
-  return Array.from(counts.entries())
-    .filter(([, c]) => c >= threshold)
-    .sort((a, b) => b[1] - a[1])
-    .map(([tok]) => tok);
-}
-
-/* --- Création : garde le même nom de fonction publique --- */
 function openSavePatternModal(patternKey, patternData) {
   const occIds = (patternData?.occurrences || []).slice();
-  const occs = occIds.map(id => agencementsById.get(id)).filter(Boolean);
 
-  const signature = computePatternSignatureFromOccurrences(occs);
-  const elements = computeFragmentsUnionFromOccurrences(occIds); // flatten fragments pour l’affichage
+  const occs = occIds
+    .map(id => agencementsById.get(id))
+    .filter(Boolean)
+    .sort((a, b) => parseInt(String(a.id).replace('A', ''), 10) - parseInt(String(b.id).replace('A', ''), 10));
+
+  const signature = buildSavedPatternSignatureFromOccurrences(occs);
+  const elements = buildSavedPatternElementsFromOccurrences(occs);
 
   openPatternEditor({
     mode: 'create',
     patternKey,
-    elements,                  // on garde ce champ pour la UI (liste)
-    criteria: signature.numericMeans, // si tu veux continuer à afficher des “valeurs”
+    occurrences: occs,
+    elements,
     name: (patternNames?.[patternKey]) || patternKey,
     description: '',
     headerText: 'Enregistrer ce pattern (agencements)',
     onSave: (payload) => {
       const rec = {
-        uid: 'sp_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7),
-
+        uid: 'sp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
         patternKey,
         name: payload.name,
         description: payload.description,
 
-        // ✅ vrai contenu du pattern
+        // structure principale
         occurrences: occIds.slice(),
+        savedOccurrences: cloneDeep(payload.occurrences || []),
 
-        // ✅ “flatten” pour confort UI (photos, liste)
-        elements: elements.slice(),
+        // aide UI
+        elements: payload.elements.slice(),
 
-        // ✅ signature stable
-        signature,
+        // signature
+        signature: cloneDeep(signature),
 
-        // ✅ contexte de calcul (reproductible)
+        // paramètres du moteur au moment de l’enregistrement
         params: getCurrentPatternParams(),
 
         savedAt: new Date().toISOString()
       };
 
       addSavedPattern(rec);
-      openSavedPatternPanel(rec.uid);
+
+      // ouvre explicitement la sidebar enregistrée
+      openSavedPatternPanel(rec.uid, { replaceTabs: true });
     }
   });
 }
 
-/* --- Édition d’un pattern SAUVEGARDÉ (par UID) --- */
 function openEditSavedPatternModal(uid) {
   const items = loadSavedPatterns();
   const rec = items.find(x => x.uid === uid);
   if (!rec) return;
 
+  const occs = getSavedPatternOccurrencesResolved(rec);
+  const elements = buildSavedPatternElementsFromOccurrences(occs);
+
   openPatternEditor({
     mode: 'edit',
     patternKey: rec.patternKey,
-    elements: rec.elements || [],
-    criteria: rec.criteria || {},      // ⇐ on garde les critères fuzzy
+    occurrences: occs,
+    elements,
     name: rec.name || rec.patternKey,
     description: rec.description || '',
+    headerText: 'Modifier ce pattern enregistré',
     onSave: (payload) => {
-      // On ne modifie ici que nom + description (les critères peuvent rester)
       updateSavedPattern(uid, {
         name: payload.name,
         description: payload.description
       });
 
-      // rafraîchir la fiche ouverte si elle existe
-      const tabId = `saved-${uid}`;
       const updated = loadSavedPatterns().find(x => x.uid === uid);
+      if (!updated) return;
+
+      // si la fiche est déjà ouverte, on la rerend
+      const tabId = `saved-${uid}`;
       if (Tabbed?.openTabs?.has(tabId)) {
         const panel = Tabbed.openTabs.get(tabId).panel;
         renderSavedPatternPanel(panel, updated);
-        // mettre à jour le titre de l'onglet
-        Tabbed.openTabs.get(tabId).btn.firstChild.nodeValue = (updated.name || updated.patternKey);
+        focusTab(tabId);
+      } else {
+        openSavedPatternPanel(uid, { replaceTabs: true });
       }
 
-      // rafraîchir la liste si la modale est ouverte
       const listModal = document.getElementById('saved-patterns-list-modal');
       if (listModal && listModal.style.display === 'block') {
         openSavedPatternsListModal();
@@ -7407,54 +8025,79 @@ function openEditSavedPatternModal(uid) {
   });
 }
 
+/*==================================================
+=             LISTE DES PATTERNS SAUVÉS           =
+==================================================*/
 
-
-function openSavedPatternsListModal(){
+function closeSavedPatternsListModal() {
   const modal = document.getElementById('saved-patterns-list-modal');
-  const body  = document.getElementById('splist-body');
+  if (!modal) return;
+
   const closeBtn = document.getElementById('splist-close');
+  const backdrop = document.querySelector('#saved-patterns-list-modal .modal__backdrop');
+
+  if (closeBtn) closeBtn.onclick = null;
+  if (backdrop) backdrop.onclick = null;
+
+  modal.style.display = 'none';
+}
+
+function openSavedPatternsListModal() {
+  const modal = document.getElementById('saved-patterns-list-modal');
+  const body = document.getElementById('splist-body');
+  const closeBtn = document.getElementById('splist-close');
+  const backdrop = document.querySelector('#saved-patterns-list-modal .modal__backdrop');
 
   body.innerHTML = '';
-  const items = loadSavedPatterns().slice().sort((a,b) => (new Date(b.savedAt)) - (new Date(a.savedAt)));
 
-  if (!items.length){
+  const items = loadSavedPatterns()
+    .slice()
+    .sort((a, b) => (new Date(b.savedAt)) - (new Date(a.savedAt)));
+
+  if (!items.length) {
     body.innerHTML = '<div style="color:#aaa">Aucun pattern enregistré pour le moment.</div>';
   } else {
     items.forEach(rec => {
+      const occCount = (rec.savedOccurrences || rec.occurrences || []).length;
+      const fragCount = (rec.elements || []).length;
+
       const card = document.createElement('div');
       card.className = 'saved-item';
+
       const h = document.createElement('h4');
-      h.textContent = `${rec.name}  (${rec.patternKey})`;
+      h.textContent = `${rec.name} (${rec.patternKey})`;
+
       const meta = document.createElement('div');
       meta.className = 'meta';
       meta.textContent =
-  `Enregistré: ${fmtDate(rec.savedAt)} • Occurrences: ${rec.occurrences?.length || 0} • Fragments: ${rec.elements?.length || 0}`;
+        `Enregistré : ${fmtDate(rec.savedAt)} • Agencements : ${occCount} • Fragments : ${fragCount}`;
+
       const row = document.createElement('div');
       row.className = 'row';
 
       const bOpen = document.createElement('button');
       bOpen.className = 'tab-btn btn-sm primary';
       bOpen.textContent = 'Consulter';
-      bOpen.onclick = () => { modal.style.display = 'none'; openSavedPatternPanel(rec.uid); };
+      bOpen.onclick = () => {
+        closeSavedPatternsListModal();
+        openSavedPatternPanel(rec.uid, { replaceTabs: true });
+      };
 
-       // ⬇️ Unifie Renommer + Modifier description
       const bEdit = document.createElement('button');
       bEdit.className = 'tab-btn btn-sm';
       bEdit.textContent = 'Modifier';
       bEdit.onclick = () => openEditSavedPatternModal(rec.uid);
 
       const bDel = document.createElement('button');
-bDel.className = 'tab-btn btn-sm danger';
-bDel.textContent = 'Supprimer';
-bDel.onclick = () => {
-  // suppression immédiate, sans confirmation
-  deleteSavedPattern(rec.uid);
-  // rafraîchir la liste
-  openSavedPatternsListModal();
-};
-
+      bDel.className = 'tab-btn btn-sm danger';
+      bDel.textContent = 'Supprimer';
+      bDel.onclick = () => {
+        deleteSavedPattern(rec.uid);
+        openSavedPatternsListModal();
+      };
 
       row.append(bOpen, bEdit, bDel);
+
       const p = document.createElement('div');
       p.style.cssText = 'margin-top:6px;color:#ccc;white-space:pre-wrap';
       p.textContent = rec.description || '—';
@@ -7464,19 +8107,34 @@ bDel.onclick = () => {
     });
   }
 
-  function close(){ modal.style.display = 'none'; cleanup(); }
-  function cleanup(){ document.querySelector('#saved-patterns-list-modal .modal__backdrop').onclick = null; closeBtn.onclick = null; }
-  document.querySelector('#saved-patterns-list-modal .modal__backdrop').onclick = close;
+  function close() {
+    closeSavedPatternsListModal();
+  }
+
+  backdrop.onclick = close;
   closeBtn.onclick = close;
 
   modal.style.display = 'block';
 }
 
+/*==================================================
+=               SIDEBAR PATTERN SAUVÉ             =
+==================================================*/
 
-function openSavedPatternPanel(uid) {
+function openSavedPatternPanel(uid, { replaceTabs = false } = {}) {
   const items = loadSavedPatterns();
   const rec = items.find(x => x.uid === uid);
   if (!rec) return;
+
+  // si tu veux un comportement "ancien" :
+  // 1 pattern consulté = 1 vraie sidebar ouverte
+  if (replaceTabs) {
+    clearAllTabbedTabs();
+  }
+
+  ensureTabbedSidebar();
+  showTabbedSidebar();
+  Tabbed.el.style.display = 'block';
 
   openTab({
     id: `saved-${uid}`,
@@ -7484,166 +8142,170 @@ function openSavedPatternPanel(uid) {
     kind: 'saved-pattern',
     render: panel => renderSavedPatternPanel(panel, rec)
   });
+
+  focusTab(`saved-${uid}`);
 }
+
+/*==================================================
+=          RENDU DU PANEL PATTERN SAUVÉ           =
+==================================================*/
 
 function renderSavedPatternPanel(panel, rec) {
   panel.innerHTML = '';
 
-  /* --------------------------------------------
-     1) Titre + méta
-  -------------------------------------------- */
+  const occs = getSavedPatternOccurrencesResolved(rec);
+  const byFragId = getAllCurrentFragmentsMap();
+  const byBldId = getAllCurrentBuildingsMap();
+
+  const elements = rec.elements?.length
+    ? rec.elements.slice()
+    : buildSavedPatternElementsFromOccurrences(occs);
+
   const h2 = document.createElement('h2');
   h2.textContent = `${rec.name || rec.patternKey} — (enregistré)`;
   panel.appendChild(h2);
 
   const meta = document.createElement('div');
-  meta.style.cssText = 'color:#aaa;font-size:12px;margin-bottom:8px';
+  meta.style.cssText = 'color:#aaa;font-size:12px;margin-bottom:8px;';
   meta.textContent =
-  `ID: ${rec.patternKey} • Occurrences: ${rec.occurrences?.length || 0} • Fragments: ${rec.elements?.length || 0} • Sauvé: ${fmtDate(rec.savedAt)}` +
-  (rec.updatedAt ? ` • Modifié: ${fmtDate(rec.updatedAt)}` : '');
+    `ID : ${rec.patternKey} • Agencements : ${occs.length} • Fragments : ${elements.length} • Sauvé : ${fmtDate(rec.savedAt)}` +
+    (rec.updatedAt ? ` • Modifié : ${fmtDate(rec.updatedAt)}` : '');
   panel.appendChild(meta);
 
-  /* --------------------------------------------
-     2) Description
-  -------------------------------------------- */
   const desc = document.createElement('p');
   desc.textContent = rec.description || '—';
   panel.appendChild(desc);
 
-  /* --------------------------------------------
-     3) CRITÈRES COMMUNS (moyenne fuzzy)
-        => comme dans renderPatternPanel
-  -------------------------------------------- */
-  const ids = rec.elements || []; // garde pour la liste des fragments plus bas
-const signature = rec.signature || { numericMeans: rec.criteria || {}, textTokens: {} };
-const consensus = signature.numericMeans || {};
+  if (rec.params) {
+    const params = document.createElement('div');
+    params.style.cssText = 'color:#aaa;font-size:12px;margin:8px 0;';
+    params.textContent =
+      `Paramètres : diamètre ${rec.params.perimeterDiameterM} m • seuil ${Number(rec.params.agSimilarityThreshold).toFixed(2)} • zones ${((rec.params.zones || []).join(', ') || '—')}`;
+    panel.appendChild(params);
+  }
 
-  const critBlock = document.createElement('div');
-  critBlock.className = 'pattern-crit-block';
+  /* ------------------------------
+     Agencements enregistrés
+  ------------------------------ */
+  const occBlock = document.createElement('div');
+  occBlock.className = 'pattern-members';
 
-  const hCrit = document.createElement('h3');
-  hCrit.textContent = 'Critères communs';
-  critBlock.appendChild(hCrit);
+  const hOcc = document.createElement('h3');
+  hOcc.textContent = 'Agencements enregistrés';
+  occBlock.appendChild(hOcc);
 
-  const entries = Object.entries(consensus)
-    .filter(([k, v]) => v !== null && v >= 0.2)
-    .sort((a, b) => b[1] - a[1]);
-
-  if (!entries.length) {
-    const none = document.createElement('p');
-    none.textContent = 'Aucun critère commun significatif.';
+  if (!occs.length) {
+    const none = document.createElement('div');
     none.style.color = '#aaa';
-    critBlock.appendChild(none);
+    none.textContent = 'Aucun agencement retrouvé.';
+    occBlock.appendChild(none);
   } else {
-    entries.forEach(([k, v]) => {
+    occs.forEach(ag => {
       const row = document.createElement('div');
-      row.className = 'crit-row';
+      row.className = 'member-row';
+      row.style.cursor = 'pointer';
 
-      const label = document.createElement('span');
-      label.className = 'crit-label';
-      label.textContent = k.replace(/_/g, ' ');
+      const thumb = document.createElement('div');
+      thumb.className = 'member-thumb';
 
-      const val = document.createElement('span');
-      val.className = 'crit-value';
-      val.textContent = v.toFixed(2);
+      let foundPhoto = null;
+      for (const fid of (ag.fragmentIds || [])) {
+        const f = byFragId.get(String(fid).trim());
+        if (!f) continue;
+        const p = normalizePhotos(f.properties?.photos)[0];
+        if (p) {
+          foundPhoto = p;
+          break;
+        }
+      }
+      if (foundPhoto) {
+        thumb.style.backgroundImage = `url("${foundPhoto}")`;
+      }
 
-      row.append(label, val);
-      critBlock.appendChild(row);
+      const right = document.createElement('div');
+      right.className = 'member-right';
+
+      const title = document.createElement('div');
+      title.className = 'member-title';
+      title.textContent = `${ag.id} — ${ag.fragmentsCount} fragments • ${ag.buildingsCount} bâtiments`;
+
+      const counts = {
+        stable: 0,
+        modified: 0,
+        appeared: 0,
+        disappeared: 0
+      };
+
+      (ag.temporalProfiles || []).forEach(tp => {
+        if (!tp?.status) return;
+        counts[tp.status] = (counts[tp.status] || 0) + 1;
+      });
+
+      const info = document.createElement('div');
+      info.className = 'member-info';
+      info.textContent =
+        `${counts.stable} stables • ${counts.modified} modifiés • ${counts.appeared} apparus • ${counts.disappeared} disparus`;
+
+      right.append(title, info);
+
+      /* ------------------------------
+         Détail fragments PAR agencement
+      ------------------------------ */
+      const fragList = document.createElement('div');
+      fragList.style.cssText = 'margin-top:8px;display:flex;flex-direction:column;gap:6px;';
+
+      if (!(ag.fragmentIds || []).length) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'color:#aaa;font-size:12px;';
+        empty.textContent = '— Aucun fragment';
+        fragList.appendChild(empty);
+      } else {
+        (ag.fragmentIds || []).forEach(fid => {
+          const frag = byFragId.get(String(fid).trim());
+
+          const fragLine = document.createElement('div');
+          fragLine.style.cssText = `
+            font-size:12px;
+            color:#ddd;
+            padding:4px 6px;
+            border:1px solid #2b2b2b;
+            border-radius:4px;
+            background:#111;
+          `;
+
+          const fragName = frag?.properties?.name || fid;
+          fragLine.textContent = `${fid} — ${fragName}`;
+
+          fragLine.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            if (frag) openFragmentWithPatternsTabs(frag.properties);
+          });
+
+          fragList.appendChild(fragLine);
+        });
+      }
+
+      right.appendChild(fragList);
+      row.append(thumb, right);
+
+      row.addEventListener('click', () => {
+        openTab({
+          id: `saved-ag-${rec.uid}-${ag.id}`,
+          title: ag.id,
+          kind: 'saved-agencement',
+          render: (p) => renderAgencementPanel(p, ag, { byFragId, byBldId })
+        });
+      });
+
+      occBlock.appendChild(row);
     });
   }
 
-  if (rec.params) {
-  const p = document.createElement('div');
-  p.style.cssText = 'color:#aaa;font-size:12px;margin:8px 0';
-  p.textContent = `Paramètres: diamètre ${rec.params.perimeterDiameterM}m • seuil ${Number(rec.params.agSimilarityThreshold).toFixed(2)} • zones ${((rec.params.zones||[]).join(', ') || '—')}`;
-  panel.appendChild(p);
-}
+  panel.appendChild(occBlock);
 
-  panel.appendChild(critBlock);
-
-
-  const textSignature = signature.textTokens || {};
-
-const textBlock = document.createElement('div');
-textBlock.className = 'pattern-crit-block';
-
-const hText = document.createElement('h3');
-hText.textContent = 'Critères textuels';
-textBlock.appendChild(hText);
-
-let hasAnyText = false;
-
-Object.entries(textSignature).forEach(([k, arr]) => {
-  if (!arr || !arr.length) return;
-  hasAnyText = true;
-
-  const row = document.createElement('div');
-  row.className = 'crit-row';
-
-  const label = document.createElement('span');
-  label.className = 'crit-label';
-  label.textContent = prettyKey(k);
-
-  const val = document.createElement('span');
-  val.className = 'crit-value';
-  val.textContent = arr.slice(0, 10).join(', ') + (arr.length > 10 ? '…' : '');
-
-  row.append(label, val);
-  textBlock.appendChild(row);
-});
-
-if (!hasAnyText) {
-  const none = document.createElement('p');
-  none.textContent = 'Aucun critère textuel commun.';
-  none.style.color = '#aaa';
-  textBlock.appendChild(none);
-}
-
-panel.appendChild(textBlock);
-
-  /* --------------------------------------------
-     4) Liste des fragments membres
-        => simple, même style que pattern normal
-  -------------------------------------------- */
-  const list = document.createElement('div');
-  list.className = 'pattern-members';
-
-  const all = [...(dataGeojson || []), ...(datamGeojson || [])];
-  const byId = new Map(all.map(f => [f.properties.id, f]));
-
-  ids.forEach(id => {
-    const f = byId.get(id);
-    if (!f) return;
-
-    const row = document.createElement('div');
-    row.className = 'member-row';
-
-    // miniature
-    const thumb = document.createElement('div');
-    thumb.className = 'member-thumb';
-    const p = normalizePhotos(f.properties.photos)[0];
-    if (p) thumb.style.backgroundImage = `url("${p}")`;
-
-    // nom
-    const right = document.createElement('div');
-    right.className = 'member-right';
-
-    const title = document.createElement('div');
-    title.className = 'member-title';
-    title.textContent = f.properties.name || id;
-
-    right.append(title);
-    row.append(thumb, right);
-
-    row.addEventListener('click', () => showDetails(f.properties));
-    list.appendChild(row);
-  });
-
-  panel.appendChild(list);
-
-  /* --------------------------------------------
-     5) Actions
-  -------------------------------------------- */
+  /* ------------------------------
+     Actions
+  ------------------------------ */
   const actions = document.createElement('div');
   actions.className = 'btn-row';
 
@@ -7657,8 +8319,7 @@ panel.appendChild(textBlock);
   bDel.textContent = 'Supprimer';
   bDel.onclick = () => {
     deleteSavedPattern(rec.uid);
-    const idTab = `saved-${rec.uid}`;
-    if (Tabbed?.openTabs?.has(idTab)) closeTab(idTab);
+    closeTab(`saved-${rec.uid}`);
   };
 
   actions.append(bEdit, bDel);
@@ -7759,3 +8420,13 @@ document.querySelectorAll('.pattern-gallery-time-btn').forEach(btn => {
 });
 
 updatePatternGalleryTimeButtonsUI();
+
+
+
+const toggleDiscoursesEl = document.getElementById('toggle-discourses');
+if (toggleDiscoursesEl) {
+  toggleDiscoursesEl.addEventListener('change', () => {
+    SHOW_DISCOURSES = toggleDiscoursesEl.checked;
+    applyFilters();
+  });
+}
