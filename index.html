@@ -36,13 +36,25 @@
 
 <!-- Sous-onglets : visible UNIQUEMENT quand "Patterns" est actif -->
 <div id="subnav-patterns" class="subnav subnav--inactive">
-  <button class="tab-btn sub-tab" data-sub="patterns-map">Carte</button>
-  <button class="tab-btn sub-tab" data-sub="proxemic">Proxémie</button>
-  <button class="tab-btn sub-tab" data-sub="gallery">Galerie</button>
+  <button class="tab-btn pattern-mode-tab active" data-pattern-mode="agencements">Agencements</button>
+  <button class="tab-btn pattern-mode-tab" data-pattern-mode="patterns">Patterns</button>
+  <button class="tab-btn pattern-mode-tab" data-pattern-mode="comparison">Comparaison</button>
+
+  <button id="create-agencement-btn" class="tab-btn sub-action">Créer un agencement</button>
+  <button id="saved-agencements-list-btn" class="tab-btn sub-action">Liste des agencements</button>
+<button id="clear-agencement-btn" class="tab-btn sub-action" style="display:none;">Vider la sélection</button>
+<button id="validate-agencement-btn" class="tab-btn sub-action" style="display:none;">Valider l’agencement</button>
 
   <button id="saved-patterns-list-btn" class="tab-btn sub-action">Liste des Patterns enregistrés</button>
-  <button id="create-unit-btn" class="tab-btn sub-action">Créer une Unité de Projet</button>
 </div>
+
+<div id="subnav-patterns-level3" class="subnav subnav--inactive">
+  <button class="tab-btn pattern-view-tab active" data-pattern-view="map">Carte</button>
+  <button class="tab-btn pattern-view-tab" data-pattern-view="proxemic">Proxémie</button>
+  <button class="tab-btn pattern-view-tab pattern-gallery-tab" data-pattern-view="gallery">Galerie</button>
+</div>
+
+<div id="subnav-placeholder-level3" class="subnav subnav--inactive"></div>
 
 
 <!-- Sous-onglets : visible UNIQUEMENT quand "Unité de projet" est actif -->
@@ -78,11 +90,27 @@
 <!-- Vue proxémie existante (ta “patterns/proxémie”) -->
 <div id="proxemic-view" class="view" style="display:none;"></div>
 <!-- Vue galerie existante -->
- <div id="gallery-view" class="view" style="display:none; position: absolute; top: 55px; left: 10px; right: 0; bottom: 0; background: white; overflow-y: auto; z-index: 100; padding: 80px; box-sizing: border-box;"></div>
+ <div id="gallery-view" class="view" style="display:none; position: absolute; top: 55px; left: 10px; right: 0; bottom: 0; background: white; overflow-y: auto; z-index: 100; padding: 80px; padding-left: 200px ; box-sizing: border-box;"></div>
 <div id="pattern-gallery-time-controls" class="fragment-time-controls">
   <button class="fragment-time-btn pattern-gallery-time-btn active" data-pattern-gallery-time="T1">T1</button>
   <button class="fragment-time-btn pattern-gallery-time-btn" data-pattern-gallery-time="T2">T2</button>
 </div>
+
+<div id="comparison-view" class="view" style="
+  display:none;
+  position:absolute;
+  top:55px;
+  left:0;
+  right:0;
+  bottom:0;
+  background:white;
+  overflow-y:auto;
+  z-index:100;
+  padding:32px;
+  box-sizing:border-box;
+"></div>
+
+
 <!-- (nouveau) Vue "Unité de projet" -->
 <div id="unit-view" class="view" style="display:none; position:absolute; top:55px; left:0; right:0; bottom:0;">
   <div id="unit-map" style="width:100%; height:100%;"></div>
@@ -116,20 +144,20 @@
 <!-- CONTRÔLES -->
 
 <div id="filters">
-    <strong>Zones</strong><br>
-    <label><input type="checkbox" class="filter-zone" value="montreuil" checked> Montreuil</label><br>
-    <label><input type="checkbox" class="filter-zone" value="mirail" checked> Mirail</label><br>
-
-    <hr style="border:0; border-top:1px solid #444; margin:10px 0;">
+    <div id="zones-filter-box">
+      <strong>Zones</strong><br>
+      <label><input type="checkbox" class="filter-zone" value="montreuil" checked> Montreuil</label><br>
+      <label><input type="checkbox" class="filter-zone" value="mirail" checked> Mirail</label><br>
+      <hr style="border:0; border-top:1px solid #444; margin:10px 0;">
+    </div>
 
     <div id="discourses-toggle-box">
-  <label>
-    <input type="checkbox" id="toggle-discourses" checked>
-    Afficher les discours
-  </label><br>
-</div>
-
-    <hr style="border:0; border-top:1px solid #444; margin:10px 0;">
+      <label>
+        <input type="checkbox" id="toggle-discourses" checked>
+        Afficher les discours
+      </label><br>
+      <hr style="border:0; border-top:1px solid #444; margin:10px 0;">
+    </div>
 
     <div id="buildings-style-box">
   <strong>Bâtiments</strong><br>
@@ -147,16 +175,15 @@
 
    <!-- LEGENDE -->
 
-<div id="criteria-legend" style="position: absolute; display:none; bottom: 60px; left: 10px; width: 260px; background: white; border: 1px solid #ccc; padding: 10px; font-size: 12px; z-index: 1050; overflow-y: auto; max-height: 60vh;">
-  <strong>Critères actifs</strong><br><br>
+<div id="criteria-legend" style="position: absolute; display:none; bottom: 80px; left: 10px; width: 260px; background: white; border: 1px solid #ccc; padding: 10px; font-size: 12px; z-index: 1050; overflow-y: auto; max-height: 40vh;">
 
   <div id="agencement-controls" style="margin-bottom:10px;">
   <strong>Agencements</strong><br>
 
-  <label for="perimeter-slider">
-    Diamètre périmètre : <span id="perimeter-value">200</span> m
-  </label><br>
-  <input type="range" id="perimeter-slider" min="50" max="1200" value="200" step="10">
+<label for="perimeter-slider">
+    Rayon de recherche : <span id="perimeter-value">100</span> m
+</label><br>
+<input type="range" id="perimeter-slider" min="25" max="600" value="100" step="10">
 
   <div style="height:8px;"></div>
 
@@ -195,7 +222,7 @@
   <label><input type="checkbox" class="crit-key" data-key="DH_P1_echellepratique" checked> Échelle de la pratique</label><br>
   <label><input type="checkbox" class="crit-key" data-key="DH_P1_degremutualisation" checked> Degré de mutualisation</label><br><br>
   <em>Contestation et militance</em><br>
-  <label><input type="checkbox" class="crit-key" data-key="DH_P2_degréorganisation" checked> Degré d'organisation</label><br>
+  <label><input type="checkbox" class="crit-key" data-key="DH_P2_degreorganisation" checked> Degré d'organisation</label><br>
   <label><input type="checkbox" class="crit-key" data-key="DH_P2_porteepolitique" checked> Portée politique</label><br>
   <label><input type="checkbox" class="crit-key" data-key="DH_P2_effetspatial" checked> Effet spatial</label><br><br>
   <em>Symbolique</em><br>
@@ -210,7 +237,7 @@
   <em>Gestion de la vacance</em><br>
   <label><input type="checkbox" class="crit-key" data-key="FS_P2_abandon" checked> Degré d'abandon</label><br><br>
   <em>Economie de marché</em><br>
-  <label><input type="checkbox" class="crit-key" data-key="FS_P3_pressionfoncière" checked> Pression foncière</label><br><br>
+  <label><input type="checkbox" class="crit-key" data-key="FS_P3_pressionfonciere" checked> Pression foncière</label><br><br>
 </div>
 
 
@@ -244,7 +271,7 @@
 
 <button id="toggle-legend-btn" style="
     position: absolute;
-    top: 180px;
+    top: 300px;
     left: 10px;
     z-index: 1050;
     background-color: #000;
@@ -259,7 +286,7 @@
 <button id="toggle-location-btn"
   class="view-toggle-btn"
   onclick="toggleLocation()"
-  style="position:absolute; top:90px; right:10px; z-index:1050; background:#000; color:#fff; padding:10px; border:1px solid #fff; cursor:pointer; font-family:'Consolas', monospace;">
+  style="position:absolute; top:150px; right:10px; z-index:1050; background:#000; color:#fff; padding:10px; border:1px solid #fff; cursor:pointer; font-family:'Consolas', monospace;">
   Voir Toulouse
 </button>
 
@@ -282,54 +309,6 @@
     <p>Description.</p>
     <p>Developpé par Iness Tkhayyare, LRA ENSA Toulouse</p>
 </div>
-
-<!-- Fenêtre modale 3D -->
-<div id="three-modal" style="display:none;">
-  <div id="three-backdrop" class="modal__backdrop"></div>
-
-  <div id="three-window" class="modal__dialog" role="dialog" aria-modal="true" aria-label="3D">
-    <div class="modal__head">
-      <strong>Visualiseur 3D</strong>
-      <div class="modal__actions">
-        <button id="three-load-btn" class="tab-btn btn-sm" title="Ajouter/Remplacer 3D">Importer 3D</button>
-        <button id="three-close" class="tab-btn btn-sm danger" title="Fermer">×</button>
-      </div>
-    </div>
-    <div id="three-canvas-host" class="three-host"></div>
-  </div>
-</div>
-
-
-<!-- input fichier caché (recyclé par le bouton Importer 3D) -->
-<input id="three-file-input" type="file" accept=".glb,.gltf" style="display:none;">
-
-<!-- ===== Modale Unité de Projet (plein écran) ===== -->
-<div id="unit-modal" class="modal" style="display:none">
-  <div id="unit-backdrop" class="modal__backdrop"></div>
-  <div class="modal__dialog">
-    <div class="modal__head">
-      <h3 id="unit-title">Unité</h3>
-      <div class="modal__actions">
-        <button id="unit-btn-v1" class="tab-btn btn-sm primary">V1</button>
-        <button id="unit-btn-v2" class="tab-btn btn-sm">Importer V2</button>
-        <button id="unit-btn-compare" class="tab-btn btn-sm">Comparer</button>
-        <button id="unit-close" class="tab-btn btn-sm danger">×</button>
-      </div>
-    </div>
-
-    <div class="modal__body">
-      <!-- Vue simple -->
-      <div id="unit-single-host" class="three-host" style="display:block;"></div>
-
-      <!-- Vue comparaison -->
-      <div id="unit-compare-host" class="compare-host" style="display:none;">
-        <div class="unit-col"><div id="unit-v1-host" class="three-host"></div></div>
-        <div class="unit-col"><div id="unit-v2-host" class="three-host"></div></div>
-      </div>
-    </div>
-  </div>
-</div>
-
 
 
 <!-- Modale : Enregistrer un pattern -->
@@ -396,182 +375,6 @@
 }
 </script>
 
-
-
-<script type="module">
-import * as THREE from 'three';
-import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader }      from 'three/addons/loaders/GLTFLoader.js';
-import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-
-function fitToObject(camera, controls, object, padding = 1.2) {
-  const box = new THREE.Box3().setFromObject(object);
-  const sizeV = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-  const maxSize = Math.max(sizeV.x, sizeV.y, sizeV.z) * padding;
-
-  const fov = camera.fov * (Math.PI/180);
-  const dist = Math.abs(maxSize / (2 * Math.tan(fov/2)));
-  camera.position.copy(center.clone().add(new THREE.Vector3(dist, dist, dist)));
-  camera.near = Math.max(0.001, dist/100);
-  camera.far  = dist*100;
-  camera.updateProjectionMatrix();
-
-  controls.target.copy(center);
-  controls.update();
-}
-
-function createThreeViewer(container) {
-  // --- WebGL ---
-  const renderer = new THREE.WebGLRenderer({ antialias:true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio||1, 2));
-  container.appendChild(renderer.domElement);
-
-  // --- Labels (DOM 2D) ---
-  const labelRenderer = new CSS2DRenderer();
-  labelRenderer.domElement.style.position = 'absolute';
-  labelRenderer.domElement.style.inset = '0';
-  labelRenderer.domElement.style.pointerEvents = 'none'; // l’UI reste cliquable derrière
-  container.appendChild(labelRenderer.domElement);
-
-  // --- Scène de base ---
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x111111);
-
-  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
-  const controls = new OrbitControls(camera, renderer.domElement);
-
-  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-  const dir = new THREE.DirectionalLight(0xffffff, 1); dir.position.set(3,5,8); scene.add(dir);
-
-  const grid = new THREE.GridHelper(10, 10, 0x444444, 0x222222); scene.add(grid);
-
-  const loader = new GLTFLoader();
-  let currentRoot = null, raf = 0, labelsGroup = null;
-
-  function resize() {
-    const w = container.clientWidth || 400, h = container.clientHeight || 300;
-    renderer.setSize(w, h);
-    labelRenderer.setSize(w, h);
-    camera.aspect = w/h; camera.updateProjectionMatrix();
-  }
-  const onResize = () => resize();
-  window.addEventListener('resize', onResize); resize();
-
-  const tick = () => {
-    renderer.render(scene, camera);
-    labelRenderer.render(scene, camera);
-    raf = requestAnimationFrame(tick);
-  };
-  tick();
-
-  function clearLabels() {
-    if (!labelsGroup) return;
-    labelsGroup.children.slice().forEach(obj => {
-      if (obj.element && obj.element.remove) obj.element.remove(); // nettoie le DOM
-    });
-    if (currentRoot && labelsGroup.parent) labelsGroup.parent.remove(labelsGroup);
-    labelsGroup = null;
-  }
-
-  function buildLabel(text, className) {
-    const div = document.createElement('div');
-    div.className = `three-label ${className}`;
-    div.textContent = text;
-    const obj = new CSS2DObject(div);
-    return obj;
-  }
-
-  function setLabelsFromMeta(meta) {
-    // rien à faire si pas d’objet
-    if (!currentRoot) return;
-
-    // Nettoie les anciens
-    clearLabels();
-
-    // Calcule une boîte englobante du modèle
-    const box = new THREE.Box3().setFromObject(currentRoot);
-    const size = box.getSize(new THREE.Vector3());
-    const min  = box.min.clone();
-    const max  = box.max.clone();
-    const cx   = (min.x + max.x)/2;
-    const cz   = (min.z + max.z)/2;
-
-    labelsGroup = new THREE.Group();
-    currentRoot.add(labelsGroup);
-
-    const usages   = Array.isArray(meta?.usages)   ? meta.usages   : [];
-    const discours = Array.isArray(meta?.discours) ? meta.discours : [];
-
-    const nU = usages.length;
-    const nD = discours.length;
-    const total = nU + nD;
-
-    if (total === 0) return;
-
-    // On répartit verticalement A L’INTERIEUR du volume, de min.y -> max.y
-    const spanY = Math.max(0.0001, size.y);
-    let index = 0;
-
-    // Usages (rouge) sur une colonne légèrement à gauche
-    usages.forEach((u, i) => {
-      const o = buildLabel(u.text, 'usage');
-      const t = (i+1)/(nU+1);
-      const y = min.y + t * spanY;
-      o.position.set(cx - size.x*0.18, y, cz);
-      labelsGroup.add(o);
-      index++;
-    });
-
-    // Discours (blanc) sur une colonne légèrement à droite
-    discours.forEach((d, i) => {
-      const o = buildLabel(d.text, 'discours');
-      const t = (i+1)/(nD+1);
-      const y = min.y + t * spanY;
-      o.position.set(cx + size.x*0.18, y, cz);
-      labelsGroup.add(o);
-      index++;
-    });
-  }
-
-  async function loadGLBFromBlob(blob) {
-    return new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(blob);
-      loader.load(url, (g) => { URL.revokeObjectURL(url); resolve(g); }, undefined, reject);
-    });
-  }
-
-  async function showBlob(blob) {
-    // supprime ancien modèle + labels
-    if (currentRoot) {
-      clearLabels();
-      scene.remove(currentRoot);
-      currentRoot.traverse(o => {
-        if (o.geometry?.dispose) o.geometry.dispose();
-        if (o.material?.dispose) o.material.dispose?.();
-      });
-    }
-    const gltf = await loadGLBFromBlob(blob);
-    currentRoot = gltf.scene;
-    scene.add(currentRoot);
-    fitToObject(camera, controls, currentRoot);
-  }
-
-  function dispose() {
-    cancelAnimationFrame(raf);
-    window.removeEventListener('resize', onResize);
-    clearLabels();
-    renderer.dispose();
-    if (renderer.domElement.parentNode === container) container.removeChild(renderer.domElement);
-    if (labelRenderer.domElement.parentNode === container) container.removeChild(labelRenderer.domElement);
-  }
-
-  return { showBlob, setLabelsFromMeta, dispose };
-}
-
-// Expose au script principal
-window.__ThreeFactory__ = { createThreeViewer };
-</script>
 
 
 

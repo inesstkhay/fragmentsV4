@@ -35,7 +35,7 @@ body {
         #filters {
             position: absolute;
             color: white;
-            top: 90px;
+            top: 150px;
             left: 10px;
             background: rgb(0, 0, 0);
             padding: 10px;
@@ -168,10 +168,27 @@ input[type="range"] {
   padding: 6px 10px;
   border-bottom: 1px solid #ddd;
 }
-.subnav .sub-action {
-  margin-left: auto; /* pousse le bouton à droite */
-  opacity: 0.85;
+
+#subnav-patterns .sub-action.active {
+  background: #2a2a2a;
+  color: #fff;
+  font-weight: 600;
+  top: auto;
+  border-bottom: 1px solid #666;
+  border-color: #8a8a8a;
+  box-shadow: none;
 }
+
+#subnav-patterns {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
+
+
+
 .view { /* optionnel si tu préfères tout piloter en inline via JS */
   width: 100%;
   height: 100%;
@@ -198,17 +215,17 @@ input[type="range"] {
 /* Sub-bar: always visible under the main navbar */
 #subnav-patterns {
   position: absolute;
-  top: 38px;              /* just under the navbar */
+  top: 38px;
   left: 0;
   right: 0;
   z-index: 1060;
   background: #000;
   border-bottom: 1px solid #4d4d4d;
   padding: 6px 10px;
-  display: flex;          /* always displayed */
-  gap: 8px;
+  display: flex;
   align-items: center;
-  min-height: 36px;       /* consistent height across views */
+  gap: 8px;
+  min-height: 36px;
 }
 
 /* When not on “Patterns”, keep the bar but hide the controls */
@@ -253,9 +270,52 @@ input[type="range"] {
   display: none !important;
 }
 
-#subnav-patterns { display: flex; align-items: center; gap: 8px; }
-#subnav-patterns .sub-action { margin-left: auto; } /* si tu veux actions à droite */
-#subnav-patterns .sub-action { display: inline-flex; }
+
+
+.subnav .sub-action {
+  opacity: 1;
+}
+
+/* groupe des boutons d’action à droite */
+
+/* style des boutons d’action : plus des boutons que des onglets */
+#subnav-patterns .sub-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 12px;
+  border: 1px solid #666;
+  border-radius: 4px;
+  background: #373737;
+  color: #eaeaea;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 400;
+  cursor: pointer;
+  box-shadow: none;
+  position: static;
+  top: auto;
+}
+
+/* hover */
+#subnav-patterns .sub-action:hover {
+  background: #2a2a2a;
+  border-color: #8a8a8a;
+  color: #fff;
+}
+
+/* quand un bouton d’action est "armé" ou actif dans ton JS */
+#subnav-patterns .sub-action.is-armed {
+  background: #fff;
+  color: #000;
+  border-color: #aaa;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+#create-agencement-btn {
+  margin-left: auto;
+}
 
 
 /* (optionnel) si ton bouton est sous la sous-barre, descends-le un peu */
@@ -1066,4 +1126,47 @@ input[type="range"] {
   font-size: 12px;
   display: none;
   font-family: 'Consolas', monospace;
+}
+
+
+
+
+#subnav-patterns-level3{
+  position: absolute;
+  top: 86px;
+  left: 0;
+  right: 0;
+  z-index: 1059;
+  background: #000;
+  border-bottom: 1px solid #4d4d4d;
+  padding: 6px 10px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 36px;
+}
+
+#subnav-patterns-level3.subnav--inactive{
+  display: none !important;
+}
+
+
+#subnav-placeholder-level3{
+  position: absolute;
+  top: 86px;
+  left: 0;
+  right: 0;
+  z-index: 1059;
+  background: #000;
+  border-bottom: 1px solid #4d4d4d;
+  padding: 6px 10px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 49px;
+  box-sizing: border-box;
+}
+
+#subnav-placeholder-level3.subnav--inactive{
+  display: none !important;
 }
