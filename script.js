@@ -1,19 +1,12 @@
 
 /***************************************************
- * backdoorurbanism — script.js
+ fragments — script.js
  ***************************************************/
 /* ==================================================
    0) CONFIGURATION GÉNÉRALE
-   Paramètres fixes du site :
-   - coordonnées de départ
-   - seuils de calcul
-   - listes de critères
-   - couleurs
-   Ces valeurs peuvent être ajustées sans modifier
-   la structure du reste du code.
 ================================================== */
 /* ==================================================
-   ÉTAT GLOBAL — VUES ET LOCALISATION
+   0.1) Territoires / vues initiales
 ================================================== */
 
 
@@ -25,7 +18,7 @@ const toulouseZoom = 15;
 
 
 /* ==================================================
-   PARAMÈTRES DU MOTEUR PATTERNS / AGENCEMENTS
+  0.2) Paramètres du moteur agencements / patterns
 ================================================== */
 
 let PERIMETER_DIAMETER_M = 100;
@@ -38,9 +31,8 @@ let MAX_AG_OVERLAP = 0.05;
 let MIN_PATTERN_OCCURRENCES = 2;
 
 
-
 /* ==================================================
-   PARAMÈTRES DE COMPARAISON FUZZY
+0.3)  Paramètres fuzzy hérités
 ================================================== */
 
 let SIM_THRESHOLD = 0.75;
@@ -50,7 +42,7 @@ let MIN_COMMON_NON_NULL = 3;
 let MAX_NULL_MISMATCH_RATIO = 0.20;
 
 /* ==================================================
-   COULEURS POUR LES FONCTIONS DE BÂTIMENTS
+   0.4) OULEURS POUR LES FONCTIONS DE BÂTIMENTS
 ================================================== */
 
 const BUILDING_FUNCTION_COLORS = {
@@ -69,7 +61,7 @@ const BUILDING_FUNCTION_COLORS = {
 
 
 /* ==================================================
-   CLES FUZZY ET TEXTUELLES
+   0.4 bis) CLES FUZZY ET TEXTUELLES
 ================================================== */
 
 const ALL_FUZZY_KEYS = [
@@ -152,27 +144,67 @@ const FUZZY_GROUPS = {
 
 
 /* ==================================================
-   SATURATION ET LUMINOSITÉ DES COULEURS DE PATTERNS
+   0.4 bis) SATURATION ET LUMINOSITÉ DES COULEURS DE PATTERNS
 ================================================== */
 
 const SAT_SEQ = [95, 85, 90, 80];
 const LIT_SEQ = [58, 70, 50, 64];
 
 
+/* ==================================================
+   0.5) Paramètres des occurrences / doublons
+================================================== */
+
+// interdit qu'une occurrence soit presque au même endroit que la graine
+let MIN_OCCURRENCE_DISTANCE_FACTOR = 1.5;
+
+// interdit qu'une occurrence reprenne exactement les mêmes fragments
+let REJECT_EXACT_SAME_FRAGMENT_SET = true;
+
+// interdit aussi les recouvrements trop forts en fragments
+let MAX_FRAGMENT_OVERLAP_WITH_SEED = 0.5;
+let MAX_OCCURRENCE_OVERLAP_BETWEEN_CANDIDATES = 0.75;
+let MIN_DISTINCT_OCCURRENCE_SIMILARITY = 0.88;
+
+/* ==================================================
+   0.6) Paramètres temporalités
+================================================== */
+
+let TEMPORAL_STATUS_PENALTY = 0.60;
+let TEMPORAL_APP_DIS_STRICT = true;
+let TEMPORAL_MIN_MATCH_SCORE = 0.05;
+
+/* ==================================================
+   0.7) Clés localStorage
+================================================== */
+
+const SAVED_AGENCEMENTS_KEY = 'savedManualAgencementsV1';
+const AUTO_AGENCEMENT_NAMES_KEY = 'autoAgencementNamesV1';
+const SAVED_PATTERNS_KEY = 'savedPatternsV2';
+
+/* ==================================================
+   0.8) Critères actifs et couleurs des patterns
+================================================== */
+
+let ACTIVE_CRITERIA_KEYS = new Set(ALL_CRITERIA_KEYS);
+
+const PATTERN_COLORS = Object.fromEntries(
+  Array.from({ length: 100 }, (_, i) => {
+    const hue = Math.round((i * 137.508) % 360);
+    const sat = SAT_SEQ[i % SAT_SEQ.length];
+    const lit = LIT_SEQ[(Math.floor(i / 4)) % LIT_SEQ.length];
+    return [`P${i + 1}`, `hsl(${hue}, ${sat}%, ${lit}%)`];
+  })
+);
+
 
 
 /* ==================================================
    1) ÉTAT GLOBAL DE L’APPLICATION
-   Variables vivantes du site :
-   - vue active
-   - données chargées
-   - résultats calculés
-   - références de cartes, couches et modales
-   Ce bloc centralise ce qui change pendant l’usage.
 ================================================== */
 
 /* ==================================================
-   ÉTAT GLOBAL — DONNÉES CALCULÉES
+   1.1) Navigation / vue active
 ================================================== */
 
 
@@ -189,6 +221,10 @@ let currentComparisonLeft = '';
 let currentComparisonRight = '';
 
 let SHOW_DIFFRACTIONS = false;
+
+/* ==================================================
+   1.2) Données chargées / calculées
+================================================== */
 
 let agencements = [];
 let fragmentToPatternIds = new Map();
@@ -208,11 +244,18 @@ let discoursGeojson = [];
 
 let SHOW_DISCOURSES = true;
 
+/* ==================================================
+   1.3) Index Discours
+================================================== */
+
 let discourseById = new Map();
 let discourseByFragmentId = new Map();
 let discourseByBuildingId = new Map();
 
-/* temporalités */
+/* ==================================================
+   1.4) Index Temporalités
+================================================== */
+
 
 let dataGeojsonT1 = [];
 let dataGeojsonT2 = [];
@@ -221,9 +264,6 @@ let datamGeojsonT2 = [];
 
 let currentFragmentTimeMode = 'T1';
 let currentPatternGalleryTimeMode = 'T1';
-
-let fragmentTemporalControl = null;
-let fragmentTrajectoryLegend = null;
 
 let fragmentLayersGroup = null;
 
@@ -234,11 +274,10 @@ let temporalFragmentIndex = {
 
 
 /* ==================================================
-   ÉTAT GLOBAL — BÂTIMENTS
+   1.5) Bâtiments
 ================================================== */
 
 let BUILDINGS_STYLE_MODE = 'etat';
-
 
 let batimentsLayerMontreuil = null;
 let batimentsLayerToulouse = null;
@@ -247,7 +286,7 @@ let unitBuildingsLayer = null;
 
 
 /* ==================================================
-   ÉTAT GLOBAL — UNITÉ DE PROJET
+   1.6) Unité de projet (plus a jour)
 ================================================== */
 
 let unitCreation = {
@@ -263,6 +302,10 @@ let unitContextGroup = null;
 let unitPatternGroup = null;
 let unitContext = null;
 
+/* ==================================================
+   1.7) Cartes patterns / couches
+================================================== */
+
 let discoursLayer = null;
 
 let patternMap = null;
@@ -271,20 +314,16 @@ let patternOverlayGroup = null;     // anneaux colorés
 let patternPanes = new Map();       // pane par anneau
 
 let patternMembersLayer = null;     // fragments + bâtiments colorés par pattern
-
-
 let savedAgencementsLayer = null;
 
-let TEMPORAL_STATUS_PENALTY = 0.60;
-let TEMPORAL_APP_DIS_STRICT = true;
-let TEMPORAL_MIN_MATCH_SCORE = 0.05;
+/* ==================================================
+   1.8) Agencement manuel / caches
+================================================== */
 
 
 let __imgObserver = null;
 
-/* ==================================================
-   ETAT GLOBAL NV AGENCEMENTS / PATTERNS
-================================================== */
+/*ETAT GLOBAL NV AGENCEMENTS / PATTERNS*/
 
 let agencementCreation = {
   active: false,
@@ -308,59 +347,23 @@ let hydratedSavedAgencementsCacheKey = '';
 let ACTIVE_CRITERIA_CACHE_KEY = Array.from(ALL_CRITERIA_KEYS).sort().join('|');
 let lastPatternComputeKey = '';
 
-function resetAgencementCreation() {
-  agencementCreation.active = false;
-  agencementCreation.mode = null;
-  agencementCreation.selectedFragments.clear();
-  agencementCreation.selectedBuildings.clear();
-  agencementCreation.sourceAgencement = null;
-}
-
-function getCurrentManualAgencement() {
-  const fragments = Array.from(agencementCreation.selectedFragments.values());
-  const buildings = Array.from(agencementCreation.selectedBuildings.values());
-
-  return {
-    id: 'AG_MANUAL_1',
-    mode: 'manual',
-    fragments,
-    buildings,
-    fragmentIds: fragments.map(f => String(f.properties?.id || '').trim()).sort(),
-    buildingIds: buildings.map(b => String(b.properties?.id || '').trim()).sort(),
-    fragmentsCount: fragments.length,
-    buildingsCount: buildings.length
-  };
-}
 
 /* ==================================================
-   PARAMÈTRES DE CONTRÔLE DES OCCURRENCES
+   2) RÉFÉRENCES DOM GLOBALES ET CARTE PRINCIPALE
 ================================================== */
 
-// interdit qu'une occurrence soit presque au même endroit que la graine
-let MIN_OCCURRENCE_DISTANCE_FACTOR = 1.5;
-
-// interdit qu'une occurrence reprenne exactement les mêmes fragments
-let REJECT_EXACT_SAME_FRAGMENT_SET = true;
-
-// interdit aussi les recouvrements trop forts en fragments
-let MAX_FRAGMENT_OVERLAP_WITH_SEED = 0.5;
-
-
-let MAX_OCCURRENCE_OVERLAP_BETWEEN_CANDIDATES = 0.75;
-let MIN_DISTINCT_OCCURRENCE_SIMILARITY = 0.88;
-
 /* ==================================================
-   RÉFÉRENCES DOM FRÉQUENTES
+   2.1 Références DOM fréquentes
 ================================================== */
 
 const proxemicView = document.getElementById('proxemic-view');
 const fragmentProxemicView = document.getElementById('fragment-proxemic-view');
-
 const subnavPlaceholderLevel3 = document.getElementById('subnav-placeholder-level3');
 
 /* ==================================================
-   CARTE PRINCIPALE — INITIALISATION
+   2.2 Carte principale — initialisation
 ================================================== */
+
 
 let map = L.map('map').setView(montreuilView, montreuilZoom);
 /* layer fragment pour la temporalité */
@@ -383,44 +386,15 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 
-
 /* ==================================================
-   CRITÈRES — LISTES DE CLÉS
-================================================== */
-
-
-let ACTIVE_CRITERIA_KEYS = new Set(ALL_CRITERIA_KEYS);
-
-
-
-
-/* ==================================================
-   COULEURS DES PATTERNS
-================================================== */
-
-
-const PATTERN_COLORS = Object.fromEntries(
-  Array.from({ length: 100 }, (_, i) => {
-    const hue = Math.round((i * 137.508) % 360);
-    const sat = SAT_SEQ[i % SAT_SEQ.length];
-    const lit = LIT_SEQ[(Math.floor(i / 4)) % LIT_SEQ.length];
-    return [`P${i + 1}`, `hsl(${hue}, ${sat}%, ${lit}%)`];
-  })
-);
-
-
-
-
-
-/* ==================================================
-   3) HELPERS GÉNÉRAUX
+  3) HELPERS 
    Petites fonctions utilitaires réutilisées partout.
    Elles ne pilotent pas l’interface directement :
-   elles transforment, calculent ou normalisent.
+   elles transforment, calculent ou normalisent
 ================================================== */
 
 /* ==================================================
-   HELPERS — TEXTE ET NORMALISATION
+   3.1) HELPERS — Texte, formatage, identifiants
 ================================================== */
 
 function normStr(v) {
@@ -480,9 +454,148 @@ function fmtAny(v) {
   return fmtFuzzy(v);
 }
 
+function escapeHtml(v) {
+  return String(v ?? '').replace(/[&<>"']/g, s => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[s]));
+}
+
+function fmtDate(iso){
+  try { const d = new Date(iso); return d.toLocaleString(); } catch(e){ return iso || ''; }
+}
+
+function cleanFragmentId(id) {
+  return String(id || '').trim().toUpperCase();
+}
+
 
 /* ==================================================
-   HELPERS — FUZZY ET CRITÈRES
+   3.2) HELPERS — Tableaux, comptages, parsing simple
+================================================== */
+
+
+function uniqClean(arr = []) {
+  return Array.from(
+    new Set(
+      (arr || [])
+        .map(v => String(v || '').trim())
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+function countLabels(arr = []) {
+  const out = {};
+  (arr || []).forEach(v => {
+    const key = String(v || '').trim();
+    if (!key) return;
+    out[key] = (out[key] || 0) + 1;
+  });
+  return out;
+}
+
+function entriesSortedByCount(obj = {}) {
+  return Object.entries(obj)
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return a[0].localeCompare(b[0], undefined, { numeric: true });
+    });
+}
+
+function intersectArrays(arrays = []) {
+  const clean = arrays
+    .map(arr => uniqClean(arr))
+    .filter(arr => arr.length);
+
+  if (!clean.length) return [];
+
+  let inter = new Set(clean[0]);
+  for (let i = 1; i < clean.length; i++) {
+    const cur = new Set(clean[i]);
+    inter = new Set([...inter].filter(x => cur.has(x)));
+  }
+
+  return [...inter].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+function parseGeojsonList(str) {
+  const out = [];
+  if (str && typeof str === "string") {
+    str.split(/[;,]/).forEach(x => {
+      const t = x.trim();
+      if (t && t !== "-") out.push(t);
+    });
+  }
+  return out;
+}
+
+function parseAssociatedIds(str) {
+  if (!str || str === '-') return [];
+
+  return String(str)
+    .split(/[;,]/)
+    .map(s => String(s || '').trim().toUpperCase())
+    .filter(Boolean);
+}
+
+function addToMapArray(map, key, value) {
+  if (!key) return;
+  if (!map.has(key)) map.set(key, []);
+  map.get(key).push(value);
+}
+
+function getTokenArrayFromSource(obj, key) {
+  const raw = obj?.[key];
+
+  if (Array.isArray(raw)) {
+    return raw.map(normalizeToken).filter(Boolean);
+  }
+
+  return parseMultiText(raw) || [];
+}
+
+function diffTokenArrays(arrA = [], arrB = []) {
+  const A = new Set(arrA || []);
+  const B = new Set(arrB || []);
+
+  const common = [];
+  const onlyA = [];
+  const onlyB = [];
+
+  A.forEach(x => {
+    if (B.has(x)) common.push(x);
+    else onlyA.push(x);
+  });
+
+  B.forEach(x => {
+    if (!A.has(x)) onlyB.push(x);
+  });
+
+  common.sort();
+  onlyA.sort();
+  onlyB.sort();
+
+  return { common, onlyA, onlyB };
+}
+
+function fuzzyValuesEqual(a, b) {
+  if (a === null && b === null) return true;
+  if (a === null || b === null) return false;
+  return Math.abs(Number(a) - Number(b)) < 0.0001;
+}
+
+function getCommonIdSet(idsA = [], idsB = []) {
+  const B = new Set((idsB || []).map(x => String(x).trim()));
+  return new Set((idsA || []).map(x => String(x).trim()).filter(x => B.has(x)));
+}
+
+
+/* ==================================================
+   3.3) HELPERS — Parsing fuzzy et similarités élémentaires
 ================================================== */
 
 function parseFuzzy(v) {
@@ -509,7 +622,25 @@ function parseFuzzy(v) {
   return Number.isFinite(num) ? num : null;
 }
 
+function jaccardSimilarity(listA, listB) {
+  const A = new Set(listA || []);
+  const B = new Set(listB || []);
+  if (!A.size && !B.size) return 0;
 
+  let inter = 0;
+  for (const x of A) {
+    if (B.has(x)) inter++;
+  }
+
+  const uni = A.size + B.size - inter;
+  return uni ? (inter / uni) : 0;
+}
+
+function average(nums) {
+  const vals = (nums || []).filter(v => Number.isFinite(v));
+  if (!vals.length) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
 
 function featureToVector(feature) {
   if (!feature) return [];
@@ -566,20 +697,6 @@ function similarityFuzzy(vec1, vec2) {
 
   if (count === 0) return 0;
   return 1 - (sum / count);
-}
-
-function jaccardSimilarity(listA, listB) {
-  const A = new Set(listA || []);
-  const B = new Set(listB || []);
-  if (!A.size && !B.size) return 0;
-
-  let inter = 0;
-  for (const x of A) {
-    if (B.has(x)) inter++;
-  }
-
-  const uni = A.size + B.size - inter;
-  return uni ? (inter / uni) : 0;
 }
 
 
@@ -641,10 +758,43 @@ function topVectorDifferences(vecA, vecB, { topN = 3 } = {}) {
   return diffs.slice(0, Math.max(1, topN));
 }
 
+function averageActiveFuzzyForFeature(feature, keys = []) {
+  const vals = (keys || [])
+    .filter(k => ACTIVE_CRITERIA_KEYS.has(k))
+    .map(k => parseFuzzy(feature?.properties?.[k]))
+    .filter(v => v !== null && Number.isFinite(v));
+
+  return vals.length ? average(vals) : null;
+}
+
 
 /* ==================================================
-   HELPERS — GÉOMÉTRIE
+   3.4) HELPERS — Géométrie de base
 ================================================== */
+
+function centroidFromCoordList(coordList) {
+  if (!Array.isArray(coordList) || coordList.length === 0) return null;
+
+  let sumLng = 0;
+  let sumLat = 0;
+  let n = 0;
+
+  for (const pt of coordList) {
+    if (!pt || pt.length < 2) continue;
+
+    const lng = Number(pt[0]);
+    const lat = Number(pt[1]);
+
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+
+    sumLng += lng;
+    sumLat += lat;
+    n++;
+  }
+
+  if (!n) return null;
+  return L.latLng(sumLat / n, sumLng / n);
+}
 
 function getFeatureCenterLatLng(feature) {
   if (!feature) return null;
@@ -702,29 +852,6 @@ function getFeatureCenterLatLng(feature) {
   return null;
 }
 
-function centroidFromCoordList(coordList) {
-  if (!Array.isArray(coordList) || coordList.length === 0) return null;
-
-  let sumLng = 0;
-  let sumLat = 0;
-  let n = 0;
-
-  for (const pt of coordList) {
-    if (!pt || pt.length < 2) continue;
-
-    const lng = Number(pt[0]);
-    const lat = Number(pt[1]);
-
-    if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
-
-    sumLng += lng;
-    sumLat += lat;
-    n++;
-  }
-
-  if (!n) return null;
-  return L.latLng(sumLat / n, sumLng / n);
-}
 
 function distanceMeters(a, b) {
   if (!a || !b) return Infinity;
@@ -746,12 +873,6 @@ function distanceMeters(a, b) {
     Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
 
   return 2 * R * Math.asin(Math.sqrt(s));
-}
-
-function featureWithinRadius(feature, centerLatLng, radiusM) {
-  const ll = getFeatureCenterLatLng(feature);
-  if (!ll) return false;
-  return distanceMeters(ll, centerLatLng) <= radiusM;
 }
 
 
@@ -817,15 +938,103 @@ function sortFeaturesForClickPriority(features = []) {
   return arr;
 }
 
+function latLngAverage(latlngs) {
+  const pts = (latlngs || []).filter(Boolean);
+  if (!pts.length) return null;
+
+  let sumLat = 0;
+  let sumLng = 0;
+
+  pts.forEach(ll => {
+    sumLat += ll.lat;
+    sumLng += ll.lng;
+  });
+
+  return L.latLng(sumLat / pts.length, sumLng / pts.length);
+}
 
 /* ==================================================
-   HELPERS — temporalités
+   3.5) HELPERS — Images
 ================================================== */
 
 
-function cleanFragmentId(id) {
-  return String(id || '').trim().toUpperCase();
+function cleanPhotoUrl(u) {
+  if (!u) return null;
+
+  let s = String(u).trim().replace(/^http:\/\//i, 'https://');
+  const m = s.match(/https?:\/\/[^\s"'<>]+/i);
+
+  return m ? m[0] : null;
 }
+
+function normalizePhotos(p) {
+  if (!p) return [];
+  if (Array.isArray(p)) return p;
+
+  if (typeof p === 'string') {
+    return p.split(/[;,]\s*/).filter(Boolean);
+  }
+
+  return [];
+}
+
+function makeImg(src, alt = 'photo', { priority = 'low', lazy = true } = {}) {
+  const url = cleanPhotoUrl(src);
+  if (!url) return null;
+
+  const img = document.createElement('img');
+  img.alt = alt;
+  img.decoding = 'async';
+  img.referrerPolicy = 'no-referrer';
+  img.onerror = () => {
+    img.style.display = 'none';
+  };
+
+  img.setAttribute('fetchpriority', priority);
+  img.fetchPriority = priority;
+
+  if (lazy) img.loading = 'lazy';
+
+  if (lazy && 'IntersectionObserver' in window) {
+    img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    img.dataset.src = url;
+    ensureImgObserver().observe(img);
+  } else {
+    img.src = url;
+  }
+
+  return img;
+}
+
+function ensureImgObserver() {
+  if (__imgObserver) return __imgObserver;
+
+  __imgObserver = new IntersectionObserver((entries, obs) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+
+      const img = entry.target;
+      const real = img.dataset.src;
+
+      if (real) {
+        img.src = real;
+        img.removeAttribute('data-src');
+      }
+
+      obs.unobserve(img);
+    });
+  }, {
+    rootMargin: '800px 0px',
+    threshold: 0.01
+  });
+
+  return __imgObserver;
+}
+
+/* ==================================================
+   3.6) HELPERS — Temporalités
+================================================== */
+
 
 function getSiteColor(zone) {
   return zone === 'mirail' ? 'blue' : 'red';
@@ -913,8 +1122,6 @@ function areGeometriesEquivalent(g1, g2) {
   }
 }
 
-
-
 function getSiteTemporalPalette(zone) {
   if (zone === 'mirail') {
     return {
@@ -930,7 +1137,6 @@ function getSiteTemporalPalette(zone) {
     dark: '#780101'
   };
 }
-
 
 function getTrajectoryStyle(status, zone) {
   const palette = getSiteTemporalPalette(zone);
@@ -1022,7 +1228,6 @@ function getGreyTrajectoryStyle(status) {
   };
 }
 
-
 function getFragmentProxemicSourceFeatures(timeMode = 'T1') {
   if (timeMode === 'T2') {
     return [...(dataGeojsonT2 || []), ...(datamGeojsonT2 || [])];
@@ -1054,7 +1259,6 @@ function getFragmentProxemicSourceFeatures(timeMode = 'T1') {
 
   return [...(dataGeojsonT1 || []), ...(datamGeojsonT1 || [])];
 }
-
 
 function getZoneTemporalArrays(zone) {
   if (zone === 'mirail') {
@@ -1223,7 +1427,6 @@ function computeTemporalFragmentPairScore(profileA, profileB) {
 }
 
 
-
 function getPatternBaseFeaturesForCurrentTimeMode() {
   const activeZones = getActiveZones ? getActiveZones() : ['montreuil', 'mirail'];
 
@@ -1268,88 +1471,9 @@ function getPatternBaseFeaturesForCurrentTimeMode() {
   return out;
 }
 
-/* ==================================================
-   HELPERS — IMAGES
-================================================== */
-
-function cleanPhotoUrl(u) {
-  if (!u) return null;
-
-  let s = String(u).trim().replace(/^http:\/\//i, 'https://');
-  const m = s.match(/https?:\/\/[^\s"'<>]+/i);
-
-  return m ? m[0] : null;
-}
-
-function normalizePhotos(p) {
-  if (!p) return [];
-  if (Array.isArray(p)) return p;
-
-  if (typeof p === 'string') {
-    return p.split(/[;,]\s*/).filter(Boolean);
-  }
-
-  return [];
-}
-
-function makeImg(src, alt = 'photo', { priority = 'low', lazy = true } = {}) {
-  const url = cleanPhotoUrl(src);
-  if (!url) return null;
-
-  const img = document.createElement('img');
-  img.alt = alt;
-  img.decoding = 'async';
-  img.referrerPolicy = 'no-referrer';
-  img.onerror = () => {
-    img.style.display = 'none';
-  };
-
-  img.setAttribute('fetchpriority', priority);
-  img.fetchPriority = priority;
-
-  if (lazy) img.loading = 'lazy';
-
-  if (lazy && 'IntersectionObserver' in window) {
-    img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-    img.dataset.src = url;
-    ensureImgObserver().observe(img);
-  } else {
-    img.src = url;
-  }
-
-  return img;
-}
-
-
-
-function ensureImgObserver() {
-  if (__imgObserver) return __imgObserver;
-
-  __imgObserver = new IntersectionObserver((entries, obs) => {
-    entries.forEach(entry => {
-      if (!entry.isIntersecting) return;
-
-      const img = entry.target;
-      const real = img.dataset.src;
-
-      if (real) {
-        img.src = real;
-        img.removeAttribute('data-src');
-      }
-
-      obs.unobserve(img);
-    });
-  }, {
-    rootMargin: '800px 0px',
-    threshold: 0.01
-  });
-
-  return __imgObserver;
-}
-
 
 /* ==================================================
-   HELPERS — BÂTIMENTS
+   3.7) HELPERS — BÂTIMENTS
 ================================================== */
 
 function getPropEtat(props) {
@@ -1573,7 +1697,6 @@ function restyleBuildingsOnFragmentsMap() {
   });
 }
 
-
 function extractBuildingProfile(buildings = []) {
   const profile = {
     fonctions: new Set(),
@@ -1600,17 +1723,8 @@ function extractBuildingProfile(buildings = []) {
 
 
 /* ==================================================
-   HELPERS — PATTERNS ET AGENCEMENTS
+   3.8) HELPERS — Signatures et similarités d’agencements
 ================================================== */
-
-function average(nums) {
-  const vals = (nums || []).filter(v => Number.isFinite(v));
-  if (!vals.length) return null;
-  return vals.reduce((a, b) => a + b, 0) / vals.length;
-}
-
-
-
 
 function overlapRatioByIds(idsA, idsB) {
   const A = new Set(idsA || []);
@@ -1624,7 +1738,6 @@ function overlapRatioByIds(idsA, idsB) {
 
   return inter / Math.min(A.size, B.size);
 }
-
 
 function getActiveCriteriaKeysArray() {
   return Array.from(ACTIVE_CRITERIA_KEYS || []);
@@ -1650,15 +1763,6 @@ function getCurrentPatternParams() {
   };
 }
 
-
-function averageActiveFuzzyForFeature(feature, keys = []) {
-  const vals = (keys || [])
-    .filter(k => ACTIVE_CRITERIA_KEYS.has(k))
-    .map(k => parseFuzzy(feature?.properties?.[k]))
-    .filter(v => v !== null && Number.isFinite(v));
-
-  return vals.length ? average(vals) : null;
-}
 
 function getFragmentDominantPole(feature) {
   const scores = {
@@ -1812,8 +1916,6 @@ function similarityBuildingProfiles(profileA, profileB) {
   return (sFonctions + sEtats) / 2;
 }
 
-
-
 function computeAgencementRelationalSignature(fragments = [], buildings = []) {
   const fragList = (fragments || []).filter(Boolean);
   const bldList = (buildings || []).filter(Boolean);
@@ -1863,8 +1965,6 @@ function similarityAgencements(agA, agB) {
   // Le bâti et la taille restent des bonus légers.
   return (sSeq * 0.82) + (sBuildings * 0.10) + (sSize * 0.08);
 }
-
-
 
 function sameFragmentSet(idsA = [], idsB = []) {
   const a = [...idsA].map(x => String(x).trim()).sort();
@@ -1938,68 +2038,9 @@ function sortAgencementsById(a, b) {
 
 
 /* ==================================================
-   HELPERS — sidebar
+   3.9) HELPERS — Composition analytique d’un agencement (sidebar)
 ================================================== */
 
-function uniqClean(arr = []) {
-  return Array.from(
-    new Set(
-      (arr || [])
-        .map(v => String(v || '').trim())
-        .filter(Boolean)
-    )
-  ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-}
-
-function countLabels(arr = []) {
-  const out = {};
-  (arr || []).forEach(v => {
-    const key = String(v || '').trim();
-    if (!key) return;
-    out[key] = (out[key] || 0) + 1;
-  });
-  return out;
-}
-
-function entriesSortedByCount(obj = {}) {
-  return Object.entries(obj)
-    .sort((a, b) => {
-      if (b[1] !== a[1]) return b[1] - a[1];
-      return a[0].localeCompare(b[0], undefined, { numeric: true });
-    });
-}
-
-function intersectArrays(arrays = []) {
-  const clean = arrays
-    .map(arr => uniqClean(arr))
-    .filter(arr => arr.length);
-
-  if (!clean.length) return [];
-
-  let inter = new Set(clean[0]);
-  for (let i = 1; i < clean.length; i++) {
-    const cur = new Set(clean[i]);
-    inter = new Set([...inter].filter(x => cur.has(x)));
-  }
-
-  return [...inter].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-}
-
-function getAgencementTextComposition(ag) {
-  const fragments = ag?.fragments || [];
-  const out = {};
-
-  TEXT_KEYS.forEach(key => {
-    const values = [];
-    fragments.forEach(f => {
-      const toks = parseMultiText(f?.properties?.[key]) || [];
-      values.push(...toks);
-    });
-    out[key] = uniqClean(values);
-  });
-
-  return out;
-}
 
 function getAgencementTemporalComposition(ag) {
   return (ag?.fragments || [])
@@ -2016,17 +2057,6 @@ function getAgencementTemporalComposition(ag) {
     })
     .filter(x => x.id)
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
-}
-
-function getAgencementBuildingComposition(ag) {
-  return (ag?.buildings || []).map(b => {
-    const props = b?.properties || {};
-    return {
-      id: String(props.id || '').trim(),
-      fonction: props.fonction || props['fonction'] || '—',
-      etat: props['état'] || props.etat || '—'
-    };
-  });
 }
 
 function computePatternGroupingLogic(occs = []) {
@@ -2105,202 +2135,401 @@ function computePatternGroupingLogic(occs = []) {
   };
 }
 
-function appendSimpleBlock(panel, title, rows = []) {
-  const box = document.createElement('div');
-  box.className = 'pattern-crit-block';
 
-  const h = document.createElement('h3');
-  h.textContent = title;
-  box.appendChild(h);
+/* ==================================================
+   3.10) HELPERS - Contours / convex hull / géométrie avancée
+================================================== */
+/* CONTOUR */
 
-  if (!rows.length) {
-    const empty = document.createElement('div');
-    empty.style.color = '#aaa';
-    empty.textContent = '—';
-    box.appendChild(empty);
-    panel.appendChild(box);
+function extractFeatureLatLngs(feature) {
+  const out = [];
+  const geom = feature?.geometry;
+  if (!geom) return out;
+
+  function walk(coords) {
+    if (!Array.isArray(coords)) return;
+
+    // cas [lng, lat]
+    if (
+      coords.length >= 2 &&
+      typeof coords[0] === 'number' &&
+      typeof coords[1] === 'number'
+    ) {
+      const lng = Number(coords[0]);
+      const lat = Number(coords[1]);
+
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        out.push(L.latLng(lat, lng));
+      }
+      return;
+    }
+
+    coords.forEach(walk);
+  }
+
+  walk(geom.coordinates);
+  return out;
+}
+
+function dedupeLatLngs(latlngs, precision = 6) {
+  const seen = new Set();
+  const out = [];
+
+  (latlngs || []).forEach(ll => {
+    if (!ll) return;
+    const key = `${Number(ll.lat).toFixed(precision)},${Number(ll.lng).toFixed(precision)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(ll);
+  });
+
+  return out;
+}
+
+function cross2D(o, a, b) {
+  return (a.lng - o.lng) * (b.lat - o.lat) - (a.lat - o.lat) * (b.lng - o.lng);
+}
+
+function computeConvexHullLatLng(latlngs) {
+  const pts = dedupeLatLngs(latlngs).slice();
+
+  if (pts.length < 3) return pts;
+
+  pts.sort((p1, p2) => {
+    if (p1.lng !== p2.lng) return p1.lng - p2.lng;
+    return p1.lat - p2.lat;
+  });
+
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross2D(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross2D(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+
+  lower.pop();
+  upper.pop();
+
+  return lower.concat(upper);
+}
+
+function buildAgencementBoundsLatLngs(ag) {
+  const pts = [];
+
+  (ag.fragments || []).forEach(f => {
+    pts.push(...extractFeatureLatLngs(f));
+  });
+
+  (ag.buildings || []).forEach(b => {
+    pts.push(...extractFeatureLatLngs(b));
+  });
+
+  const uniquePts = dedupeLatLngs(pts);
+
+  if (!uniquePts.length) return null;
+
+  // 1 seul point
+  if (uniquePts.length === 1) {
+    const c = uniquePts[0];
+    const d = 0.00004;
+    return [
+      L.latLng(c.lat + d, c.lng - d),
+      L.latLng(c.lat + d, c.lng + d),
+      L.latLng(c.lat - d, c.lng + d),
+      L.latLng(c.lat - d, c.lng - d)
+    ];
+  }
+
+  // 2 points -> petit losange allongé
+  if (uniquePts.length === 2) {
+    const a = uniquePts[0];
+    const b = uniquePts[1];
+
+    const midLat = (a.lat + b.lat) / 2;
+    const midLng = (a.lng + b.lng) / 2;
+
+    const dx = b.lng - a.lng;
+    const dy = b.lat - a.lat;
+    const len = Math.sqrt(dx * dx + dy * dy) || 1;
+
+    const nx = -dy / len;
+    const ny = dx / len;
+
+    const pad = 0.00005;
+
+    return [
+      L.latLng(a.lat + ny * pad, a.lng + nx * pad),
+      L.latLng(b.lat + ny * pad, b.lng + nx * pad),
+      L.latLng(b.lat - ny * pad, b.lng - nx * pad),
+      L.latLng(a.lat - ny * pad, a.lng - nx * pad)
+    ];
+  }
+
+  return computeConvexHullLatLng(uniquePts);
+}
+
+/* ==================================================
+   4) INDEX, MÉTADONNÉES LOCALES ET PERSISTANCE
+================================================== */
+
+/* ==================================================
+   4.1) Métadonnées locales de fragments
+================================================== */
+
+function getFragMetaKey(id){ return `fragmeta:${id}`; }
+function loadFragmentMeta(fragmentId) {
+  try {
+    return JSON.parse(localStorage.getItem(getFragMetaKey(fragmentId)) || 'null') || { usages: [], discours: [] };
+  } catch(e) { return { usages: [], discours: [] }; }
+}
+function saveFragmentMeta(fragmentId, meta) {
+  localStorage.setItem(getFragMetaKey(fragmentId), JSON.stringify(meta));
+  window.dispatchEvent(new CustomEvent('fragmeta:updated', { detail: { fragmentId, meta } }));
+}
+function uid(){ return Math.random().toString(36).slice(2,9); }
+
+/* ==================================================
+   4.2) Index discours
+================================================== */
+
+
+function buildDiscourseIndexes(features) {
+  discourseById = new Map();
+  discourseByFragmentId = new Map();
+  discourseByBuildingId = new Map();
+
+  (features || []).forEach(feature => {
+    const props = feature?.properties || {};
+    const id = String(props.id || '').trim().toUpperCase();
+
+    if (id) {
+      discourseById.set(id, feature);
+    }
+
+    const fragIds = parseAssociatedIds(props.fragment_associe);
+    fragIds.forEach(fid => addToMapArray(discourseByFragmentId, fid, feature));
+
+    const buildingIds = parseAssociatedIds(props.batiment_associe);
+    buildingIds.forEach(bid => addToMapArray(discourseByBuildingId, bid, feature));
+  });
+}
+
+function getDiscoursesForFragment(fragmentId) {
+  const id = String(fragmentId || '').trim().toUpperCase();
+  return discourseByFragmentId.get(id) || [];
+}
+
+function getDiscoursesForBuilding(buildingId) {
+  const id = String(buildingId || '').trim().toUpperCase();
+  return discourseByBuildingId.get(id) || [];
+}
+
+
+function getDiscoursesForAgencement(ag) {
+  const discourseMap = new Map();
+
+  (ag?.fragmentIds || []).forEach(fid => {
+    getDiscoursesForFragment(fid).forEach(feature => {
+      const did = String(feature?.properties?.id || '').trim().toUpperCase();
+      if (did) discourseMap.set(did, feature);
+    });
+  });
+
+  (ag?.buildingIds || []).forEach(bid => {
+    getDiscoursesForBuilding(bid).forEach(feature => {
+      const did = String(feature?.properties?.id || '').trim().toUpperCase();
+      if (did) discourseMap.set(did, feature);
+    });
+  });
+
+  return Array.from(discourseMap.values()).sort((a, b) => {
+    const aId = String(a?.properties?.id || '');
+    const bId = String(b?.properties?.id || '');
+    return aId.localeCompare(bId, undefined, { numeric: true });
+  });
+}
+
+function getDiscoursesForFragmentFeature(feature) {
+  if (!feature?.properties?.id) return [];
+  return getDiscoursesForFragment(feature.properties.id) || [];
+}
+
+function getDiscoursesForBuildingFeature(feature) {
+  if (!feature?.properties?.id) return [];
+  return getDiscoursesForBuilding(feature.properties.id) || [];
+}
+
+
+/* ==================================================
+   4.3) Noms automatiques des agencements calculés
+================================================== */
+
+
+function loadAutoAgencementNames() {
+  try {
+    return JSON.parse(localStorage.getItem(AUTO_AGENCEMENT_NAMES_KEY) || '{}');
+  } catch (e) {
+    return {};
+  }
+}
+
+function getAutoAgencementName(agId, fallback = '') {
+  const names = loadAutoAgencementNames();
+  const val = String(names[agId] || '').trim();
+  return val || fallback;
+}
+
+function setAutoAgencementName(agId, name) {
+  const names = loadAutoAgencementNames();
+  const clean = String(name || '').trim();
+
+  if (clean) names[agId] = clean;
+  else delete names[agId];
+
+  localStorage.setItem(AUTO_AGENCEMENT_NAMES_KEY, JSON.stringify(names));
+}
+
+/* ==================================================
+  4.4) Sauvegarde des agencements
+================================================== */
+
+
+function loadSavedAgencements() {
+  try {
+    return JSON.parse(localStorage.getItem(SAVED_AGENCEMENTS_KEY) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveSavedAgencements(arr) {
+  localStorage.setItem(SAVED_AGENCEMENTS_KEY, JSON.stringify(arr));
+}
+
+function addSavedAgencement(rec) {
+  const arr = loadSavedAgencements();
+  arr.push(rec);
+  saveSavedAgencements(arr);
+  hydratedSavedAgencementsCache = null;
+hydratedSavedAgencementsCacheKey = '';
+}
+
+function updateSavedAgencement(uid, patch) {
+  const arr = loadSavedAgencements();
+  const i = arr.findIndex(x => x.uid === uid);
+  if (i >= 0) {
+    arr[i] = {
+      ...arr[i],
+      ...patch,
+      updatedAt: new Date().toISOString()
+    };
+    saveSavedAgencements(arr);
+    hydratedSavedAgencementsCache = null;
+hydratedSavedAgencementsCacheKey = '';
+    recomputeAgencementPatterns();
+  }
+}
+
+function deleteSavedAgencement(uid) {
+  saveSavedAgencements(loadSavedAgencements().filter(x => x.uid !== uid));
+  recomputeAgencementPatterns();
+
+  if (currentPatternMode === 'patterns' && currentView === 'patterns-map') {
+    renderPatternBaseGrey();
+    hydratedSavedAgencementsCache = null;
+hydratedSavedAgencementsCacheKey = '';
+    refreshPatternsMap();
+  }
+}
+
+function saveGeneratedAgencement(ag) {
+  if (!ag) return;
+
+  const existing = loadSavedAgencements().find(x =>
+    x.origin === 'generated' &&
+    sameFragmentSet(x.fragmentIds || [], ag.fragmentIds || []) &&
+    sameFragmentSet(x.buildingIds || [], ag.buildingIds || [])
+  );
+
+  if (existing) {
+    openSavedAgencementPanel(existing.uid);
     return;
   }
 
-  rows.forEach(item => {
-    const line = document.createElement('div');
-    line.className = 'crit-line';
+  const contourLatLngs =
+    getAgencementContourLatLngs(ag) ||
+    buildAgencementBoundsLatLngs(ag);
 
-    const lab = document.createElement('span');
-    lab.className = 'crit-label';
-    lab.textContent = item.label;
+  const generatedCount = loadSavedAgencements()
+    .filter(x => x.origin === 'generated').length;
 
-    const val = document.createElement('span');
-    val.className = 'crit-value';
-    val.textContent = item.value;
+  const saved = {
+    uid: 'ag_saved_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    id: ag.id || `AX${generatedCount + 1}`,
+    name: ag.name || ag.id || `AX${generatedCount + 1}`,
+    description: '',
+    createdAt: new Date().toISOString(),
 
-    line.append(lab, val);
-    box.appendChild(line);
-  });
+    fragmentIds: (ag.fragmentIds || []).slice(),
+    buildingIds: (ag.buildingIds || []).slice(),
+    fragmentsCount: ag.fragmentsCount || (ag.fragmentIds || []).length,
+    buildingsCount: ag.buildingsCount || (ag.buildingIds || []).length,
 
-  panel.appendChild(box);
+    contour: contourLatLngs
+      ? contourLatLngs.map(ll => [ll.lat, ll.lng])
+      : null,
+
+    origin: 'generated',
+    seedable: false,
+    sourceSeedId: ag.sourceSeedId || null
+  };
+
+  addSavedAgencement(saved);
+  refreshAgencementDisplays();
+  renderSavedAgencementsOnMap();
+  openSavedAgencementPanel(saved.uid);
 }
-
-
-
-
-
-
 
 
 /* ==================================================
-   NAVIGATION — CHANGEMENT DE TERRITOIRE
-   Bascule la carte active entre Montreuil et Toulouse.
-   La carte visée dépend de la vue ouverte :
-   - carte fragments
-   - carte patterns
-   - carte unité
+  4.5) Sauvegarde des patterns
 ================================================== */
-function toggleLocation() {
-  const locationButton = document.getElementById('toggle-location-btn');
-  let targetMap = map;
 
-  if (currentView === 'patterns-map') {
-    initPatternMapOnce();
-    if (patternMap) targetMap = patternMap;
-  } else if (currentView === 'unit' || currentView === 'unit-view') {
-    ensureUnitMap();
-    if (unitMap) targetMap = unitMap;
-  }
 
-  if (currentLocation === 'montreuil') {
-    targetMap.setView(toulouseView, toulouseZoom);
-    currentLocation = 'toulouse';
-    if (locationButton) locationButton.textContent = 'Voir Montreuil';
-  } else {
-    targetMap.setView(montreuilView, montreuilZoom);
-    currentLocation = 'montreuil';
-    if (locationButton) locationButton.textContent = 'Voir Toulouse';
-  }
-
-  if (currentView === 'map') {
-    restyleBuildingsOnFragmentsMap();
-  }
+function loadSavedPatterns(){
+  try { return JSON.parse(localStorage.getItem(SAVED_PATTERNS_KEY) || '[]'); }
+  catch(e){ return []; }
+}
+function saveSavedPatterns(arr){
+  localStorage.setItem(SAVED_PATTERNS_KEY, JSON.stringify(arr));
+}
+function addSavedPattern(rec){
+  const arr = loadSavedPatterns();
+  arr.push(rec);
+  saveSavedPatterns(arr);
+}
+function updateSavedPattern(uid, patch){
+  const arr = loadSavedPatterns();
+  const i = arr.findIndex(x => x.uid === uid);
+  if (i >= 0) { arr[i] = { ...arr[i], ...patch, updatedAt: new Date().toISOString() }; saveSavedPatterns(arr); }
+}
+function deleteSavedPattern(uid){
+  saveSavedPatterns(loadSavedPatterns().filter(x => x.uid !== uid));
 }
 
 /* ==================================================
-   SIDEBAR — OUVERTURE D’UN PANNEAU
-   Ouvre le bon onglet selon le type d’objet cliqué :
-   fragment, bâtiment, discours ou pattern.
+  4.6) Hydratation, caches, reconstruction
 ================================================== */
-
-
-// Ouvre le bon panneau selon le type d’objet cliqué
-function showDetails(props) {
-  clearAllTabbedTabs(); // exclusif : 1 clic = 1 set d’infos (fonction en Partie 2)
-
-  if (props.isPattern) {
-    const key = props.patternKey || 'Pattern';
-    openTab({                         // openTab / renderPatternPanel en Partie 2
-      id: `pattern-${key}`,
-      title: key,
-      kind: 'pattern',
-      render: (panel) => renderPatternPanel(panel, key, patterns[key] || {})
-    });
-  } else if (props.isDiscourse) {
-    openTab({                         // renderDiscoursePanel en Partie 2
-      id: `disc-${props.id || Math.random().toString(36).slice(2)}`,
-      title: props.id || 'Discours',
-      kind: 'discourse',
-      render: (panel) => renderDiscoursePanel(panel, props)
-    });
- } else if (props.isBuilding) {
-    const bid = props.id || Math.random().toString(36).slice(2);
-    openTab({
-      id: `bat-${bid}`,
-      title: props.id || 'Bâtiment',
-      kind: 'building',
-      render: (panel) => renderBuildingPanel(panel, props)
-    });
-  } else {
-    const fid = props.id || Math.random().toString(36).slice(2);
-    openTab({                         // renderFragmentPanel en Partie 2
-      id: `frag-${fid}`,
-      title: props.id || 'Fragment',
-      kind: 'fragment',
-      render: (panel) => renderFragmentPanel(panel, props)
-    });
-  }
-
-  // masque les anciennes sidebars (sécurité)
-  const sb1 = document.getElementById('spatial-sidebar');
-  const sb2 = document.getElementById('discourse-sidebar');
-  if (sb1) sb1.style.display = 'none';
-  if (sb2) sb2.style.display = 'none';
-}
-
-function closeSidebars() {
-  const sb1 = document.getElementById('spatial-sidebar');
-  const sb2 = document.getElementById('discourse-sidebar');
-  if (sb1) sb1.style.display = 'none';
-  if (sb2) sb2.style.display = 'none';
-  clearAllTabbedTabs(); // (Partie 2)
-}
-
-/* ==================================================
-   FILTRES — MISE À JOUR GLOBALE
-   1) masque / affiche les couches selon les zones
-   2) recalcule les agencements et patterns visibles
-   3) rafraîchit la vue active
-================================================== */
-
-function applyFilters() {
-  const toggleDiscoursesEl = document.getElementById('toggle-discourses');
-  SHOW_DISCOURSES = toggleDiscoursesEl ? toggleDiscoursesEl.checked : true;
-
-  const activeZones = getActiveZones();
-
-  allLayers.forEach(layer => {
-    const props = layer?.feature?.properties || {};
-    const isDiscourse = !!props.isDiscourse;
-    const showLayer = isDiscourse ? SHOW_DISCOURSES : activeZones.includes(layer.zone);
-
-    if (showLayer) {
-      if (!map.hasLayer(layer)) layer.addTo(map);
-    } else {
-      if (map.hasLayer(layer)) map.removeLayer(layer);
-    }
-  });
-
-  const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
-
-if (currentPatternMode === 'patterns') {
-  recomputeAgencementPatterns({
-    fragments: visibleFragments,
-    buildings: visibleBuildings
-  });
-}
-
-    if (currentView === 'map') {
-  renderFragmentsMapByTimeMode();
-  restyleBuildingsOnFragmentsMap();
-} else if (currentView === 'fragment-proxemic') {
-  showFragmentProxemicView();
-} else if (currentView === 'proxemic') {
-  showProxemicView();
-} else if (currentView === 'gallery') {
-  showGalleryView();
-} else if (currentView === 'patterns-map') {
-  renderPatternBaseGrey();
-
-  if (currentPatternMode === 'patterns') {
-    refreshPatternsMap();
-  } else if (currentPatternMode === 'agencements') {
-    refreshAgencementSelectionMap();
-  }
-} else if (currentView === 'comparison') {
-  renderComparisonView();
-}
-
-  if (discoursLayer && SHOW_DISCOURSES) discoursLayer.bringToFront();
-}
-
-
 
 /*==================================================
 =     HYDRATATION DES AGENCEMENTS SAUVEGARDÉS      =
@@ -2345,22 +2574,6 @@ function getAllBuildingsById() {
   );
 
   return allBuildingsByIdCache;
-}
-
-
-function latLngAverage(latlngs) {
-  const pts = (latlngs || []).filter(Boolean);
-  if (!pts.length) return null;
-
-  let sumLat = 0;
-  let sumLng = 0;
-
-  pts.forEach(ll => {
-    sumLat += ll.lat;
-    sumLng += ll.lng;
-  });
-
-  return L.latLng(sumLat / pts.length, sumLng / pts.length);
 }
 
 function getAgencementContourLatLngs(ag) {
@@ -2466,10 +2679,718 @@ function getSelectedAgencementsForPatterns() {
   return hydratedSavedAgencementsCache;
 }
 
+function buildSavedPatternOccurrenceSnapshot(ag, patternKey = '') {
+  if (!ag) return null;
 
-/*==================================================
-=       PATTERNS À PARTIR DES AGENCEMENTS          =
-==================================================*/
+  const contourLatLngs =
+    getAgencementContourLatLngs(ag) ||
+    buildAgencementBoundsLatLngs(ag);
+
+  return {
+    uid: `spocc_${patternKey}_${ag.id}`,
+    id: ag.id || '',
+    name: ag.name || ag.id || '',
+    description: '',
+    createdAt: new Date().toISOString(),
+
+    fragmentIds: (ag.fragmentIds || []).map(x => cleanFragmentId(x)).filter(Boolean),
+    buildingIds: (ag.buildingIds || []).map(x => cleanFragmentId(x)).filter(Boolean),
+
+    fragmentsCount: Number(ag.fragmentsCount || (ag.fragmentIds || []).length || 0),
+    buildingsCount: Number(ag.buildingsCount || (ag.buildingIds || []).length || 0),
+
+    contour: contourLatLngs
+      ? contourLatLngs.map(ll => [ll.lat, ll.lng])
+      : null,
+
+    origin: 'saved-pattern-occurrence',
+    seedable: false,
+    sourceSeedId: ag.sourceSeedId || null,
+    patternIds: (ag.patternIds || []).slice()
+  };
+}
+
+function getSavedPatternOccurrences(rec) {
+  if (!rec) return [];
+
+  const snapshots = Array.isArray(rec.occurrenceSnapshots)
+    ? rec.occurrenceSnapshots
+    : [];
+
+  let occs = snapshots
+    .map(snap => hydrateSavedAgencement({
+      uid: snap.uid || snap.id || `spocc_${Math.random().toString(36).slice(2)}`,
+      id: snap.id || '',
+      name: snap.name || snap.id || '',
+      description: snap.description || '',
+      createdAt: snap.createdAt || rec.savedAt || null,
+
+      fragmentIds: Array.isArray(snap.fragmentIds) ? snap.fragmentIds.slice() : [],
+      buildingIds: Array.isArray(snap.buildingIds) ? snap.buildingIds.slice() : [],
+
+      fragmentsCount: snap.fragmentsCount || 0,
+      buildingsCount: snap.buildingsCount || 0,
+
+      contour: snap.contour || null,
+      origin: 'saved-pattern-occurrence',
+      seedable: false
+    }))
+    .filter(ag => ag && (ag.fragmentsCount > 0 || ag.buildingsCount > 0))
+    .sort(sortAgencementsById);
+
+  // compatibilité avec anciens patterns déjà enregistrés
+  if (!occs.length) {
+    occs = (rec.occurrences || [])
+      .map(id => agencementsById.get(id))
+      .filter(Boolean)
+      .sort(sortAgencementsById);
+  }
+
+  occs.forEach(ag => {
+    ag.patternIds = [rec.patternKey];
+  });
+
+  return occs;
+}
+
+
+
+
+/* ==================================================
+  5) FILTRES, CRITÈRES ET VISIBILITÉ GLOBALE
+================================================== */
+
+/* Zones actives (Montreuil/Mirail) */
+function getActiveZones() {
+  return Array.from(document.querySelectorAll('.filter-zone:checked')).map(cb => cb.value);
+}
+function isFeatureInActiveZones(f) {
+  const zones = getActiveZones();
+  const zone = f.properties?.zone || f.zone || null;
+  if (!zone) return true; // fallback
+
+  return zones.includes(zone);
+}
+
+function featureHasAnyActiveCriterion(feature) {
+  const props = feature?.properties || {};
+  if (!ACTIVE_CRITERIA_KEYS || ACTIVE_CRITERIA_KEYS.size === 0) return false;
+
+  for (const k of ALL_FUZZY_KEYS) {
+    if (!ACTIVE_CRITERIA_KEYS.has(k)) continue;
+    const v = parseFuzzy(props[k]);
+    if (v !== null) return true;
+  }
+
+  for (const k of TEXT_KEYS) {
+    if (!ACTIVE_CRITERIA_KEYS.has(k)) continue;
+    const arr = parseMultiText(props[k]);
+    if (arr && arr.length > 0) return true;
+  }
+
+  return false;
+}
+
+function getVisibleSpatialFeaturesForPatterns() {
+  const fragmentSource = getPatternBaseFeaturesForCurrentTimeMode()
+    .filter(f => !f?.properties?.isDiscourse && !f?.properties?.isBuilding);
+
+  const buildingSource = [
+    ...(batimentsMontreuilGeojson || []),
+    ...(batimentsToulouseGeojson || [])
+  ];
+
+  const visibleFragments = fragmentSource.filter(f =>
+    isFeatureInActiveZones(f) && featureHasAnyActiveCriterion(f)
+  );
+
+  const visibleBuildings = buildingSource.filter(f =>
+    !!f?.properties?.isBuilding && isFeatureInActiveZones(f)
+  );
+
+  return { visibleFragments, visibleBuildings };
+}
+
+/* Patterns auxquels appartient un fragment */
+function getPatternsForFragment(fragmentId) {
+  const id = cleanFragmentId(fragmentId);
+  return fragmentToPatternIds.get(id) || [];
+}
+
+function toggleLocation() {
+  const locationButton = document.getElementById('toggle-location-btn');
+  let targetMap = map;
+
+  if (currentView === 'patterns-map') {
+    initPatternMapOnce();
+    if (patternMap) targetMap = patternMap;
+  } else if (currentView === 'unit' || currentView === 'unit-view') {
+    ensureUnitMap();
+    if (unitMap) targetMap = unitMap;
+  }
+
+  if (currentLocation === 'montreuil') {
+    targetMap.setView(toulouseView, toulouseZoom);
+    currentLocation = 'toulouse';
+    if (locationButton) locationButton.textContent = 'Voir Montreuil';
+  } else {
+    targetMap.setView(montreuilView, montreuilZoom);
+    currentLocation = 'montreuil';
+    if (locationButton) locationButton.textContent = 'Voir Toulouse';
+  }
+
+  if (currentView === 'map') {
+    restyleBuildingsOnFragmentsMap();
+  }
+}
+
+/*  Filtres  1) masque / affiche les couches selon les zones    2) recalcule les agencements et patterns visibles    3) rafraîchit la vue active */
+
+function applyFilters() {
+  const toggleDiscoursesEl = document.getElementById('toggle-discourses');
+  SHOW_DISCOURSES = toggleDiscoursesEl ? toggleDiscoursesEl.checked : true;
+
+  const activeZones = getActiveZones();
+
+  allLayers.forEach(layer => {
+    const props = layer?.feature?.properties || {};
+    const isDiscourse = !!props.isDiscourse;
+    const showLayer = isDiscourse ? SHOW_DISCOURSES : activeZones.includes(layer.zone);
+
+    if (showLayer) {
+      if (!map.hasLayer(layer)) layer.addTo(map);
+    } else {
+      if (map.hasLayer(layer)) map.removeLayer(layer);
+    }
+  });
+
+  const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
+
+if (currentPatternMode === 'patterns') {
+  recomputeAgencementPatterns({
+    fragments: visibleFragments,
+    buildings: visibleBuildings
+  });
+}
+
+    if (currentView === 'map') {
+  renderFragmentsMapByTimeMode();
+  restyleBuildingsOnFragmentsMap();
+} else if (currentView === 'fragment-proxemic') {
+  showFragmentProxemicView();
+} else if (currentView === 'proxemic') {
+  showProxemicView();
+} else if (currentView === 'gallery') {
+  showGalleryView();
+} else if (currentView === 'patterns-map') {
+  renderPatternBaseGrey();
+
+  if (currentPatternMode === 'patterns') {
+    refreshPatternsMap();
+  } else if (currentPatternMode === 'agencements') {
+    refreshAgencementSelectionMap();
+  }
+} else if (currentView === 'comparison') {
+  renderComparisonView();
+}
+
+  if (discoursLayer && SHOW_DISCOURSES) discoursLayer.bringToFront();
+}
+
+/* ==================================================
+  6) SIDEBAR À ONGLETS — INFRASTRUCTURE
+================================================== */
+
+const Tabbed = {
+  el: null, tabsBar: null, content: null,
+  openTabs: new Map(),     // id -> {btn, panel, kind}
+  activeId: null
+};
+
+function ensureTabbedSidebar() {
+  if (Tabbed.el) return;
+  Tabbed.el      = document.getElementById('tabbed-sidebar');
+  Tabbed.tabsBar = document.getElementById('tabbed-sidebar-tabs');
+  Tabbed.content = document.getElementById('tabbed-sidebar-content');
+}
+
+function showTabbedSidebar() {
+  ensureTabbedSidebar();
+  Tabbed.el.style.display = 'block';
+}
+function hideTabbedSidebarIfEmpty() {
+  if (Tabbed.openTabs.size === 0) {
+    Tabbed.el.style.display = 'none';
+    Tabbed.activeId = null;
+  }
+}
+
+function clearAllTabbedTabs() {
+  ensureTabbedSidebar();
+  Array.from(Tabbed.openTabs.keys()).forEach(id => closeTab(id));
+  Tabbed.tabsBar.innerHTML = '';
+  Tabbed.content.innerHTML = '';
+  Tabbed.activeId = null;
+  Tabbed.el.style.display = 'none';
+}
+
+function focusTab(id) {
+  if (!Tabbed.openTabs.has(id)) return;
+  Tabbed.activeId = id;
+  Tabbed.openTabs.forEach((rec, key) => {
+    rec.btn.style.background = (key === id) ? '#222' : '#000';
+    rec.btn.style.color      = '#fff';
+    rec.panel.style.display  = (key === id) ? 'block' : 'none';
+  });
+}
+
+function closeTab(id) {
+  const rec = Tabbed.openTabs.get(id);
+  if (!rec) return;
+  rec.btn.remove();
+  rec.panel.remove();
+  Tabbed.openTabs.delete(id);
+  if (Tabbed.activeId === id) {
+    const last = Array.from(Tabbed.openTabs.keys()).pop();
+    if (last) focusTab(last);
+  }
+  hideTabbedSidebarIfEmpty();
+}
+
+function makeTabButton(title, id) {
+  const btn = document.createElement('button');
+  btn.textContent = title;
+  btn.title = title;
+  btn.style.cssText = 'border:1px solid #333; background:#000; color:#fff; padding:6px 8px; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:6px; border-radius:4px;';
+  btn.addEventListener('click', () => focusTab(id));
+
+  const x = document.createElement('span');
+  x.textContent = '×';
+  x.style.cssText = 'display:inline-block; padding:0 4px; border-left:1px solid #333; cursor:pointer; opacity:.85;';
+  x.addEventListener('click', (e) => { e.stopPropagation(); closeTab(id); });
+  btn.appendChild(x);
+
+  return btn;
+}
+
+function makePanelContainer(id) {
+  const panel = document.createElement('div');
+  panel.id = `panel-${id}`;
+  panel.style.display = 'none';
+  return panel;
+}
+
+function openTab({ id, title, kind, render }) {
+  ensureTabbedSidebar();
+
+  // Si onglet déjà ouvert → focus et sortir
+  if (Tabbed.openTabs.has(id)) {
+    focusTab(id);
+    Tabbed.content.scrollTop = 0;
+    return;
+  }
+
+  // Bouton onglet
+  const btn   = makeTabButton(title, id);
+  // Contenu
+  const panel = makePanelContainer(id);
+
+  // Injection dans le DOM
+  Tabbed.tabsBar.appendChild(btn);
+  Tabbed.content.appendChild(panel);
+
+  // Rendu
+  render(panel);
+
+  // Enregistrement
+  Tabbed.openTabs.set(id, { btn, panel, kind });
+
+  // Afficher la sidebar si cachée
+  showTabbedSidebar();
+
+  // Focus sur l’onglet
+  focusTab(id);
+  Tabbed.content.scrollTop = 0;
+}
+
+/* ==================================================
+  7) OUVERTURE DES PANNEAUX ET PETITS BUILDERS DE SIDEBAR
+================================================== */
+
+
+function appendMetaBox(panel, title, items, emptyText) {
+  const box = document.createElement('div');
+  box.className = 'meta-box';
+
+  const head = document.createElement('div');
+  head.className = 'meta-head';
+  head.innerHTML = `<strong>${title}</strong>`;
+  box.appendChild(head);
+
+  const list = document.createElement('div');
+  list.className = 'meta-list';
+
+  if (items && items.length) {
+    items.forEach(txt => {
+      const row = document.createElement('div');
+      row.className = 'meta-item';
+      row.innerHTML = `<div class="meta-item-text">${txt}</div>`;
+      list.appendChild(row);
+    });
+  } else {
+    const empty = document.createElement('div');
+    empty.className = 'meta-empty';
+    empty.textContent = emptyText || "—";
+    list.appendChild(empty);
+  }
+
+  box.appendChild(list);
+  panel.appendChild(box);
+}
+
+function appendSimpleBlock(panel, title, rows = []) {
+  const box = document.createElement('div');
+  box.className = 'pattern-crit-block';
+
+  const h = document.createElement('h3');
+  h.textContent = title;
+  box.appendChild(h);
+
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.style.color = '#aaa';
+    empty.textContent = '—';
+    box.appendChild(empty);
+    panel.appendChild(box);
+    return;
+  }
+
+  rows.forEach(item => {
+    const line = document.createElement('div');
+    line.className = 'crit-line';
+
+    const lab = document.createElement('span');
+    lab.className = 'crit-label';
+    lab.textContent = item.label;
+
+    const val = document.createElement('span');
+    val.className = 'crit-value';
+    val.textContent = item.value;
+
+    line.append(lab, val);
+    box.appendChild(line);
+  });
+
+  panel.appendChild(box);
+}
+
+
+function showDetails(props) {
+  clearAllTabbedTabs(); // exclusif : 1 clic = 1 set d’infos (fonction en Partie 2)
+
+  if (props.isPattern) {
+    const key = props.patternKey || 'Pattern';
+    openTab({                         // openTab / renderPatternPanel en Partie 2
+      id: `pattern-${key}`,
+      title: key,
+      kind: 'pattern',
+      render: (panel) => renderPatternPanel(panel, key, patterns[key] || {})
+    });
+  } else if (props.isDiscourse) {
+    openTab({                         // renderDiscoursePanel en Partie 2
+      id: `disc-${props.id || Math.random().toString(36).slice(2)}`,
+      title: props.id || 'Discours',
+      kind: 'discourse',
+      render: (panel) => renderDiscoursePanel(panel, props)
+    });
+ } else if (props.isBuilding) {
+    const bid = props.id || Math.random().toString(36).slice(2);
+    openTab({
+      id: `bat-${bid}`,
+      title: props.id || 'Bâtiment',
+      kind: 'building',
+      render: (panel) => renderBuildingPanel(panel, props)
+    });
+  } else {
+    const fid = props.id || Math.random().toString(36).slice(2);
+    openTab({                         // renderFragmentPanel en Partie 2
+      id: `frag-${fid}`,
+      title: props.id || 'Fragment',
+      kind: 'fragment',
+      render: (panel) => renderFragmentPanel(panel, props)
+    });
+  }
+
+  // masque les anciennes sidebars (sécurité)
+  const sb1 = document.getElementById('spatial-sidebar');
+  const sb2 = document.getElementById('discourse-sidebar');
+  if (sb1) sb1.style.display = 'none';
+  if (sb2) sb2.style.display = 'none';
+}
+
+function closeSidebars() {
+  const sb1 = document.getElementById('spatial-sidebar');
+  const sb2 = document.getElementById('discourse-sidebar');
+  if (sb1) sb1.style.display = 'none';
+  if (sb2) sb2.style.display = 'none';
+  clearAllTabbedTabs(); // (Partie 2)
+}
+
+function openDiscourseFromFeature(feature) {
+  if (!feature || !feature.properties) return;
+
+  const props = {
+    ...feature.properties,
+    isDiscourse: true
+  };
+
+  showDetails(props);
+}
+
+
+/* ==================================================
+  8) CHARGEMENT DES DONNÉES GEOJSON
+================================================== */
+
+// Contours (non interactifs)
+fetch('data/contour.geojson')
+  .then(r => r.json())
+  .then(data => {
+    L.geoJSON(data, {
+      style: { color:'#919090', weight:2, opacity:0.8, fillOpacity:0 },
+      interactive: false
+    }).addTo(map);
+  });
+
+// Fragments Montreuil + Mirail, T1 + T2
+Promise.all([
+  fetch('data/data.geojson').then(r => r.json()),
+  fetch('data/data2.geojson').then(r => r.json()),
+  fetch('data/datam.geojson').then(r => r.json()),
+  fetch('data/datam2.geojson').then(r => r.json())
+]).then(([dataT1, dataT2, dataMT1, dataMT2]) => {
+  dataGeojsonT1  = dataT1.features || [];
+  dataGeojsonT2  = dataT2.features || [];
+  datamGeojsonT1 = dataMT1.features || [];
+  datamGeojsonT2 = dataMT2.features || [];
+
+  dataGeojsonT1.forEach(f => {
+    f.properties = f.properties || {};
+    f.properties.zone = 'montreuil';
+    f.properties.__timeState = 'T1';
+  });
+
+  dataGeojsonT2.forEach(f => {
+    f.properties = f.properties || {};
+    f.properties.zone = 'montreuil';
+    f.properties.__timeState = 'T2';
+  });
+
+  datamGeojsonT1.forEach(f => {
+    f.properties = f.properties || {};
+    f.properties.zone = 'mirail';
+    f.properties.__timeState = 'T1';
+  });
+
+  datamGeojsonT2.forEach(f => {
+    f.properties = f.properties || {};
+    f.properties.zone = 'mirail';
+    f.properties.__timeState = 'T2';
+  });
+
+temporalPairsCache.montreuil = null;
+temporalPairsCache.mirail = null;
+allFragmentsByIdCache = null;
+hydratedSavedAgencementsCache = null;
+hydratedSavedAgencementsCacheKey = '';
+
+  buildTemporalFragmentIndex();
+
+  const canonicalMontreuil = [];
+  temporalFragmentIndex.montreuil.forEach(info => {
+    if (info.representative) canonicalMontreuil.push(info.representative);
+  });
+
+  const canonicalMirail = [];
+  temporalFragmentIndex.mirail.forEach(info => {
+    if (info.representative) canonicalMirail.push(info.representative);
+  });
+
+  dataGeojson = canonicalMontreuil;
+  datamGeojson = canonicalMirail;
+
+  combinedFeatures = [...dataGeojson, ...datamGeojson];
+
+renderFragmentsMapByTimeMode();
+
+const shouldPreparePatternsNow =
+  currentView === 'patterns-map' ||
+  currentView === 'proxemic' ||
+  currentView === 'gallery';
+
+if (shouldPreparePatternsNow) {
+  const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
+  recomputeAgencementPatterns({
+    fragments: visibleFragments,
+    buildings: visibleBuildings
+  });
+
+  initPatternMapOnce();
+  renderPatternBaseGrey();
+  refreshPatternsMap();
+}
+
+  if (currentView === 'patterns-map') {
+    initPatternMapOnce();
+    renderPatternBaseGrey();
+    refreshPatternsMap();
+  }
+});
+
+// Discours 
+fetch('data/discours.geojson')
+  .then(res => res.json())
+  .then(data => {
+    discoursGeojson = (data && data.features) ? data.features : [];
+
+    discoursGeojson.forEach(f => {
+      f.properties = f.properties || {};
+      f.properties.isDiscourse = true;
+
+      // si ton GeoJSON contient déjà zone, on la garde.
+      // sinon tu peux laisser null.
+      f.properties.zone = f.properties.zone || null;
+    });
+
+    buildDiscourseIndexes(discoursGeojson);
+
+    discoursLayer = L.geoJSON(
+      { type: 'FeatureCollection', features: discoursGeojson },
+      {
+        pane: 'pane-discours',
+        pointToLayer: (feature, latlng) => {
+          const visible = L.circleMarker(latlng, {
+            radius: 5,
+            fillColor: 'white',
+            color: 'white',
+            weight: 1,
+            opacity: 1,
+            fillOpacity: 0.8,
+            pane: 'pane-discours'
+          });
+
+          const clickableArea = L.circle(latlng, {
+            radius: 30,
+            color: 'transparent',
+            fillColor: 'transparent',
+            weight: 0,
+            fillOpacity: 0,
+            pane: 'pane-discours'
+          });
+
+          clickableArea.on('click', () => openDiscourseFromFeature(feature));
+          visible.on('click', () => openDiscourseFromFeature(feature));
+
+          return L.layerGroup([clickableArea, visible]);
+        },
+        onEachFeature: (feature, layerGroup) => {
+          layerGroup.feature = feature;
+          layerGroup.zone = feature.properties?.zone || null;
+          allLayers.push(layerGroup);
+        }
+      }
+    );
+
+    discoursLayer.addTo(map);
+    applyFilters();
+  });
+
+  // Bâtiments Montreuil + Toulouse
+Promise.all([
+  fetch('data/batimentsmontreuil.geojson').then(r => r.json()),
+  fetch('data/batimenttoulouse.geojson').then(r => r.json())
+]).then(([bM, bT]) => {
+
+  batimentsMontreuilGeojson = (bM && bM.features) ? bM.features : [];
+  batimentsToulouseGeojson  = (bT && bT.features) ? bT.features : [];
+
+  // IMPORTANT : on pose une "zone" dans les properties pour que les filtres marchent
+  batimentsMontreuilGeojson.forEach(f => {
+    f.properties = f.properties || {};
+    f.properties.zone = 'montreuil';
+    f.properties.isBuilding = true; // pour ne pas polluer les patterns pour l’instant
+  });
+
+  batimentsToulouseGeojson.forEach(f => {
+    f.properties = f.properties || {};
+    f.properties.zone = 'mirail';   // chez toi "Toulouse" est filtré via la checkbox "mirail"
+    f.properties.isBuilding = true;
+  });
+
+  allBuildingsByIdCache = null;
+hydratedSavedAgencementsCache = null;
+hydratedSavedAgencementsCacheKey = '';
+
+  const buildingStyle = (feature) => {
+    // style simple (tu pourras coder par état/fonction ensuite)
+    return {
+      color: '#ffffff',
+      weight: 1,
+      opacity: 0.8,
+      fillColor: '#ffffff',
+      fillOpacity: 0.08
+    };
+  };
+
+  // Montreuil
+  batimentsLayerMontreuil = L.geoJSON(
+    { type: 'FeatureCollection', features: batimentsMontreuilGeojson },
+    {
+      pane: 'pane-batiments',
+      style: buildingStyle,
+      onEachFeature: (feature, layer) => {
+        layer.zone = 'montreuil';       // cohérent avec applyFilters()
+        layer.feature = feature;        // sécurité
+        allLayers.push(layer);          // pour que applyFilters() masque/affiche
+layer.on('click', (ev) => {
+  L.DomEvent.stopPropagation(ev);
+  showDetails(feature.properties);
+});      }
+    }
+  ).addTo(map);
+  restyleBuildingsOnFragmentsMap();
+
+
+  // Toulouse/Mirail
+  batimentsLayerToulouse = L.geoJSON(
+    { type: 'FeatureCollection', features: batimentsToulouseGeojson },
+    {
+      pane: 'pane-batiments',
+      style: buildingStyle,
+      onEachFeature: (feature, layer) => {
+        layer.zone = 'mirail';
+        layer.feature = feature;
+        allLayers.push(layer);
+layer.on('click', (ev) => {
+  L.DomEvent.stopPropagation(ev);
+  showDetails(feature.properties);
+});      }
+    }
+  ).addTo(map);
+  restyleBuildingsOnFragmentsMap();
+
+
+  // Applique l'état des checkboxes (zones)
+  applyFilters();
+
+}).catch(err => {
+  console.error("Erreur chargement bâtiments:", err);
+});
+
+
+/* ==================================================
+  9) MOTEUR DE CALCUL DES AGENCEMENTS / PATTERNS
+================================================== */
 
 function agencementTouchesActiveZones(ag) {
   const activeZones = new Set((getActiveZones && getActiveZones()) || []);
@@ -2776,7 +3697,6 @@ function rebuildFragmentToPatternIndex() {
   });
 }
 
-
 function filterSeedAgencementToVisibleMembers(
   ag,
   visibleFragments = [],
@@ -2930,561 +3850,20 @@ const seeds = getSelectedAgencementsForPatterns()
   rebuildFragmentToPatternIndex();
 }
 
-
-
-/*---------------------------------------
-  AGENCEMENTS (diffractions internes)
----------------------------------------*/
 function computeInternalDiffractionEdges() {
   return [];
 }
 
 
-
 /* ==================================================
-   6) CHARGEMENT DES DONNÉES GEOJSON
-   - contour
-   - fragments
-   - discours
-   - bâtiments
-   Chaque chargement alimente les états globaux
-   puis déclenche si nécessaire un recalcul / rerender.
+  10) RENDU DES PANNEAUX LATÉRAUX
 ================================================== */
 
-// Contours (non interactifs)
-fetch('data/contour.geojson')
-  .then(r => r.json())
-  .then(data => {
-    L.geoJSON(data, {
-      style: { color:'#919090', weight:2, opacity:0.8, fillOpacity:0 },
-      interactive: false
-    }).addTo(map);
-  });
-
-// Fragments Montreuil + Mirail
-Promise.all([
-  fetch('data/data.geojson').then(r => r.json()),
-  fetch('data/data2.geojson').then(r => r.json()),
-  fetch('data/datam.geojson').then(r => r.json()),
-  fetch('data/datam2.geojson').then(r => r.json())
-]).then(([dataT1, dataT2, dataMT1, dataMT2]) => {
-  dataGeojsonT1  = dataT1.features || [];
-  dataGeojsonT2  = dataT2.features || [];
-  datamGeojsonT1 = dataMT1.features || [];
-  datamGeojsonT2 = dataMT2.features || [];
-
-  dataGeojsonT1.forEach(f => {
-    f.properties = f.properties || {};
-    f.properties.zone = 'montreuil';
-    f.properties.__timeState = 'T1';
-  });
-
-  dataGeojsonT2.forEach(f => {
-    f.properties = f.properties || {};
-    f.properties.zone = 'montreuil';
-    f.properties.__timeState = 'T2';
-  });
-
-  datamGeojsonT1.forEach(f => {
-    f.properties = f.properties || {};
-    f.properties.zone = 'mirail';
-    f.properties.__timeState = 'T1';
-  });
-
-  datamGeojsonT2.forEach(f => {
-    f.properties = f.properties || {};
-    f.properties.zone = 'mirail';
-    f.properties.__timeState = 'T2';
-  });
-
-temporalPairsCache.montreuil = null;
-temporalPairsCache.mirail = null;
-allFragmentsByIdCache = null;
-hydratedSavedAgencementsCache = null;
-hydratedSavedAgencementsCacheKey = '';
-
-  buildTemporalFragmentIndex();
-
-  const canonicalMontreuil = [];
-  temporalFragmentIndex.montreuil.forEach(info => {
-    if (info.representative) canonicalMontreuil.push(info.representative);
-  });
-
-  const canonicalMirail = [];
-  temporalFragmentIndex.mirail.forEach(info => {
-    if (info.representative) canonicalMirail.push(info.representative);
-  });
-
-  dataGeojson = canonicalMontreuil;
-  datamGeojson = canonicalMirail;
-
-  combinedFeatures = [...dataGeojson, ...datamGeojson];
-
-renderFragmentsMapByTimeMode();
-
-const shouldPreparePatternsNow =
-  currentView === 'patterns-map' ||
-  currentView === 'proxemic' ||
-  currentView === 'gallery';
-
-if (shouldPreparePatternsNow) {
-  const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
-  recomputeAgencementPatterns({
-    fragments: visibleFragments,
-    buildings: visibleBuildings
-  });
-
-  initPatternMapOnce();
-  renderPatternBaseGrey();
-  refreshPatternsMap();
-}
-
-  if (currentView === 'patterns-map') {
-    initPatternMapOnce();
-    renderPatternBaseGrey();
-    refreshPatternsMap();
-  }
-});
-
-// Discours (pane dédié + grande zone cliquable transparente)
-fetch('data/discours.geojson')
-  .then(res => res.json())
-  .then(data => {
-    discoursGeojson = (data && data.features) ? data.features : [];
-
-    discoursGeojson.forEach(f => {
-      f.properties = f.properties || {};
-      f.properties.isDiscourse = true;
-
-      // si ton GeoJSON contient déjà zone, on la garde.
-      // sinon tu peux laisser null.
-      f.properties.zone = f.properties.zone || null;
-    });
-
-    buildDiscourseIndexes(discoursGeojson);
-
-    discoursLayer = L.geoJSON(
-      { type: 'FeatureCollection', features: discoursGeojson },
-      {
-        pane: 'pane-discours',
-        pointToLayer: (feature, latlng) => {
-          const visible = L.circleMarker(latlng, {
-            radius: 5,
-            fillColor: 'white',
-            color: 'white',
-            weight: 1,
-            opacity: 1,
-            fillOpacity: 0.8,
-            pane: 'pane-discours'
-          });
-
-          const clickableArea = L.circle(latlng, {
-            radius: 30,
-            color: 'transparent',
-            fillColor: 'transparent',
-            weight: 0,
-            fillOpacity: 0,
-            pane: 'pane-discours'
-          });
-
-          clickableArea.on('click', () => openDiscourseFromFeature(feature));
-          visible.on('click', () => openDiscourseFromFeature(feature));
-
-          return L.layerGroup([clickableArea, visible]);
-        },
-        onEachFeature: (feature, layerGroup) => {
-          layerGroup.feature = feature;
-          layerGroup.zone = feature.properties?.zone || null;
-          allLayers.push(layerGroup);
-        }
-      }
-    );
-
-    discoursLayer.addTo(map);
-    applyFilters();
-  });
-
-
-  // Bâtiments Montreuil + Toulouse
-Promise.all([
-  fetch('data/batimentsmontreuil.geojson').then(r => r.json()),
-  fetch('data/batimenttoulouse.geojson').then(r => r.json())
-]).then(([bM, bT]) => {
-
-  batimentsMontreuilGeojson = (bM && bM.features) ? bM.features : [];
-  batimentsToulouseGeojson  = (bT && bT.features) ? bT.features : [];
-
-  // IMPORTANT : on pose une "zone" dans les properties pour que les filtres marchent
-  batimentsMontreuilGeojson.forEach(f => {
-    f.properties = f.properties || {};
-    f.properties.zone = 'montreuil';
-    f.properties.isBuilding = true; // pour ne pas polluer les patterns pour l’instant
-  });
-
-  batimentsToulouseGeojson.forEach(f => {
-    f.properties = f.properties || {};
-    f.properties.zone = 'mirail';   // chez toi "Toulouse" est filtré via la checkbox "mirail"
-    f.properties.isBuilding = true;
-  });
-
-  allBuildingsByIdCache = null;
-hydratedSavedAgencementsCache = null;
-hydratedSavedAgencementsCacheKey = '';
-
-  const buildingStyle = (feature) => {
-    // style simple (tu pourras coder par état/fonction ensuite)
-    return {
-      color: '#ffffff',
-      weight: 1,
-      opacity: 0.8,
-      fillColor: '#ffffff',
-      fillOpacity: 0.08
-    };
-  };
-
-  // Montreuil
-  batimentsLayerMontreuil = L.geoJSON(
-    { type: 'FeatureCollection', features: batimentsMontreuilGeojson },
-    {
-      pane: 'pane-batiments',
-      style: buildingStyle,
-      onEachFeature: (feature, layer) => {
-        layer.zone = 'montreuil';       // cohérent avec applyFilters()
-        layer.feature = feature;        // sécurité
-        allLayers.push(layer);          // pour que applyFilters() masque/affiche
-layer.on('click', (ev) => {
-  L.DomEvent.stopPropagation(ev);
-  showDetails(feature.properties);
-});      }
-    }
-  ).addTo(map);
-  restyleBuildingsOnFragmentsMap();
-
-
-  // Toulouse/Mirail
-  batimentsLayerToulouse = L.geoJSON(
-    { type: 'FeatureCollection', features: batimentsToulouseGeojson },
-    {
-      pane: 'pane-batiments',
-      style: buildingStyle,
-      onEachFeature: (feature, layer) => {
-        layer.zone = 'mirail';
-        layer.feature = feature;
-        allLayers.push(layer);
-layer.on('click', (ev) => {
-  L.DomEvent.stopPropagation(ev);
-  showDetails(feature.properties);
-});      }
-    }
-  ).addTo(map);
-  restyleBuildingsOnFragmentsMap();
-
-
-  // Applique l'état des checkboxes (zones)
-  applyFilters();
-
-}).catch(err => {
-  console.error("Erreur chargement bâtiments:", err);
-});
-
-
-
-
-/*==================================================
-=                SIDEBAR À ONGLETS                 =
-==================================================*/
-const Tabbed = {
-  el: null, tabsBar: null, content: null,
-  openTabs: new Map(),     // id -> {btn, panel, kind}
-  activeId: null
-};
-
-function ensureTabbedSidebar() {
-  if (Tabbed.el) return;
-  Tabbed.el      = document.getElementById('tabbed-sidebar');
-  Tabbed.tabsBar = document.getElementById('tabbed-sidebar-tabs');
-  Tabbed.content = document.getElementById('tabbed-sidebar-content');
-}
-
-function showTabbedSidebar() {
-  ensureTabbedSidebar();
-  Tabbed.el.style.display = 'block';
-}
-function hideTabbedSidebarIfEmpty() {
-  if (Tabbed.openTabs.size === 0) {
-    Tabbed.el.style.display = 'none';
-    Tabbed.activeId = null;
-  }
-}
-
-function clearAllTabbedTabs() {
-  ensureTabbedSidebar();
-  Array.from(Tabbed.openTabs.keys()).forEach(id => closeTab(id));
-  Tabbed.tabsBar.innerHTML = '';
-  Tabbed.content.innerHTML = '';
-  Tabbed.activeId = null;
-  Tabbed.el.style.display = 'none';
-}
-
-function focusTab(id) {
-  if (!Tabbed.openTabs.has(id)) return;
-  Tabbed.activeId = id;
-  Tabbed.openTabs.forEach((rec, key) => {
-    rec.btn.style.background = (key === id) ? '#222' : '#000';
-    rec.btn.style.color      = '#fff';
-    rec.panel.style.display  = (key === id) ? 'block' : 'none';
-  });
-}
-
-function closeTab(id) {
-  const rec = Tabbed.openTabs.get(id);
-  if (!rec) return;
-  rec.btn.remove();
-  rec.panel.remove();
-  Tabbed.openTabs.delete(id);
-  if (Tabbed.activeId === id) {
-    const last = Array.from(Tabbed.openTabs.keys()).pop();
-    if (last) focusTab(last);
-  }
-  hideTabbedSidebarIfEmpty();
-}
-
-function makeTabButton(title, id) {
-  const btn = document.createElement('button');
-  btn.textContent = title;
-  btn.title = title;
-  btn.style.cssText = 'border:1px solid #333; background:#000; color:#fff; padding:6px 8px; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:6px; border-radius:4px;';
-  btn.addEventListener('click', () => focusTab(id));
-
-  const x = document.createElement('span');
-  x.textContent = '×';
-  x.style.cssText = 'display:inline-block; padding:0 4px; border-left:1px solid #333; cursor:pointer; opacity:.85;';
-  x.addEventListener('click', (e) => { e.stopPropagation(); closeTab(id); });
-  btn.appendChild(x);
-
-  return btn;
-}
-
-function makePanelContainer(id) {
-  const panel = document.createElement('div');
-  panel.id = `panel-${id}`;
-  panel.style.display = 'none';
-  return panel;
-}
-
-function openTab({ id, title, kind, render }) {
-  ensureTabbedSidebar();
-
-  // Si onglet déjà ouvert → focus et sortir
-  if (Tabbed.openTabs.has(id)) {
-    focusTab(id);
-    Tabbed.content.scrollTop = 0;
-    return;
-  }
-
-  // Bouton onglet
-  const btn   = makeTabButton(title, id);
-  // Contenu
-  const panel = makePanelContainer(id);
-
-  // Injection dans le DOM
-  Tabbed.tabsBar.appendChild(btn);
-  Tabbed.content.appendChild(panel);
-
-  // Rendu
-  render(panel);
-
-  // Enregistrement
-  Tabbed.openTabs.set(id, { btn, panel, kind });
-
-  // Afficher la sidebar si cachée
-  showTabbedSidebar();
-
-  // Focus sur l’onglet
-  focusTab(id);
-  Tabbed.content.scrollTop = 0;
-}
-
-
-
-
-
-
-
 /* ==================================================
-   7) RENDU DES PANNEAUX LATÉRAUX
+  10.1 Panneaux objets simples
 ================================================== */
-/*==================================================
-=    MÉTADONNÉES LOCALES PAR FRAGMENT 
-==================================================*/
-function getFragMetaKey(id){ return `fragmeta:${id}`; }
-function loadFragmentMeta(fragmentId) {
-  try {
-    return JSON.parse(localStorage.getItem(getFragMetaKey(fragmentId)) || 'null') || { usages: [], discours: [] };
-  } catch(e) { return { usages: [], discours: [] }; }
-}
-function saveFragmentMeta(fragmentId, meta) {
-  localStorage.setItem(getFragMetaKey(fragmentId), JSON.stringify(meta));
-  window.dispatchEvent(new CustomEvent('fragmeta:updated', { detail: { fragmentId, meta } }));
-}
-function uid(){ return Math.random().toString(36).slice(2,9); }
 
-/* Helpers de rendu pour les métadonnées des fragments */
-function parseGeojsonList(str) {
-  const out = [];
-  if (str && typeof str === "string") {
-    str.split(/[;,]/).forEach(x => {
-      const t = x.trim();
-      if (t && t !== "-") out.push(t);
-    });
-  }
-  return out;
-}
-
-function appendMetaBox(panel, title, items, emptyText) {
-  const box = document.createElement('div');
-  box.className = 'meta-box';
-
-  const head = document.createElement('div');
-  head.className = 'meta-head';
-  head.innerHTML = `<strong>${title}</strong>`;
-  box.appendChild(head);
-
-  const list = document.createElement('div');
-  list.className = 'meta-list';
-
-  if (items && items.length) {
-    items.forEach(txt => {
-      const row = document.createElement('div');
-      row.className = 'meta-item';
-      row.innerHTML = `<div class="meta-item-text">${txt}</div>`;
-      list.appendChild(row);
-    });
-  } else {
-    const empty = document.createElement('div');
-    empty.className = 'meta-empty';
-    empty.textContent = emptyText || "—";
-    list.appendChild(empty);
-  }
-
-  box.appendChild(list);
-  panel.appendChild(box);
-}
-
-function parseAssociatedIds(str) {
-  if (!str || str === '-') return [];
-
-  return String(str)
-    .split(/[;,]/)
-    .map(s => String(s || '').trim().toUpperCase())
-    .filter(Boolean);
-}
-
-function addToMapArray(map, key, value) {
-  if (!key) return;
-  if (!map.has(key)) map.set(key, []);
-  map.get(key).push(value);
-}
-
-function buildDiscourseIndexes(features) {
-  discourseById = new Map();
-  discourseByFragmentId = new Map();
-  discourseByBuildingId = new Map();
-
-  (features || []).forEach(feature => {
-    const props = feature?.properties || {};
-    const id = String(props.id || '').trim().toUpperCase();
-
-    if (id) {
-      discourseById.set(id, feature);
-    }
-
-    const fragIds = parseAssociatedIds(props.fragment_associe);
-    fragIds.forEach(fid => addToMapArray(discourseByFragmentId, fid, feature));
-
-    const buildingIds = parseAssociatedIds(props.batiment_associe);
-    buildingIds.forEach(bid => addToMapArray(discourseByBuildingId, bid, feature));
-  });
-}
-
-function getDiscoursesForFragment(fragmentId) {
-  const id = String(fragmentId || '').trim().toUpperCase();
-  return discourseByFragmentId.get(id) || [];
-}
-
-function getDiscoursesForBuilding(buildingId) {
-  const id = String(buildingId || '').trim().toUpperCase();
-  return discourseByBuildingId.get(id) || [];
-}
-
-function getDiscoursesForPatternOccurrences(occs) {
-  const discourseMap = new Map();
-
-  (occs || []).forEach(ag => {
-    (ag.fragmentIds || []).forEach(fid => {
-      const linked = getDiscoursesForFragment(fid);
-      linked.forEach(feature => {
-        const did = String(feature?.properties?.id || '').trim().toUpperCase();
-        if (did) discourseMap.set(did, feature);
-      });
-    });
-
-    (ag.buildingIds || []).forEach(bid => {
-      const linked = getDiscoursesForBuilding(bid);
-      linked.forEach(feature => {
-        const did = String(feature?.properties?.id || '').trim().toUpperCase();
-        if (did) discourseMap.set(did, feature);
-      });
-    });
-  });
-
-  return Array.from(discourseMap.values()).sort((a, b) => {
-    const aId = String(a?.properties?.id || '');
-    const bId = String(b?.properties?.id || '');
-    return aId.localeCompare(bId, undefined, { numeric: true });
-  });
-}
-
-function openDiscourseFromFeature(feature) {
-  if (!feature || !feature.properties) return;
-
-  const props = {
-    ...feature.properties,
-    isDiscourse: true
-  };
-
-  showDetails(props);
-}
-
-function makeClickableFragmentLink(fragmentId) {
-  const btn = document.createElement('button');
-  btn.className = 'tab-btn btn-xs';
-  btn.textContent = fragmentId;
-
-  btn.addEventListener('click', () => {
-    const allFrags = [
-      ...(dataGeojsonT1 || []),
-      ...(dataGeojsonT2 || []),
-      ...(datamGeojsonT1 || []),
-      ...(datamGeojsonT2 || [])
-    ];
-
-    const frag = allFrags.find(f => {
-      const fid = String(f?.properties?.id || '').trim().toUpperCase();
-      return fid === String(fragmentId || '').trim().toUpperCase();
-    });
-
-    if (!frag) return;
-
-    showDetails(frag.properties);
-  });
-
-  return btn;
-}
-
-/*==================================================
-   PANNEAU BATIMENTS
-==================================================*/
+/*BATIMENTS*/
 function renderBuildingPanel(panel, props) {
   panel.innerHTML = '';
 
@@ -3505,9 +3884,7 @@ function renderBuildingPanel(panel, props) {
   panel.append(h2, pId, pFonction, pEtat);
 }
 
-/*==================================================
-   PANNEAU FRAGMENT
-==================================================*/
+/*FRAGMENTS*/
 function renderFragmentPanel(panel, props) {
   panel.innerHTML = '';
 
@@ -3721,11 +4098,23 @@ appendMetaBox(panel, "Éléments spatiaux", existingElementsSpatiaux, "— Aucun
   panel.append(fuzzyBlock);
 }
 
-/*==================================================
-   PANNEAU PATTERN
-==================================================*/
+/*DISCOURS*/
+function renderDiscoursePanel(panel, props) {
+  panel.innerHTML = '';
+  const h2 = document.createElement('h2'); h2.textContent = props.id || 'Discours';
+  const pA = document.createElement('p'); pA.innerHTML = `<strong>Auteur :</strong> ${props.auteur || ''}`;
+  const pD = document.createElement('p'); pD.innerHTML = `<strong>Date :</strong> ${props.date || ''}`;
+  const pS = document.createElement('p');
+  const src = props.source || '';
+  pS.innerHTML = `<strong>Source :</strong> ${ src && String(src).startsWith('http') ? `<a href="${src}" target="_blank">${src}</a>` : src }`;
+  const pT = document.createElement('p'); pT.textContent = props.contenu || '';
+  panel.append(h2, pA, pD, pS, pT);
+}
 
-
+/* ==================================================
+  10.2 Panneaux pattern / agencement
+================================================== */
+/*PATTERNS*/
 function renderPatternPanel(panel, patternKey, patternData) {
   panel.innerHTML = '';
 
@@ -3904,25 +4293,7 @@ function renderPatternPanel(panel, patternKey, patternData) {
   panel.appendChild(actions);
 }
 
-
-function getPatternFragmentInstances(occs, byFragId) {
-  const out = [];
-
-  (occs || []).forEach(ag => {
-    (ag.fragmentIds || []).forEach(fid => {
-      const f = byFragId.get(cleanFragmentId(fid));
-      if (f) out.push(f);
-    });
-  });
-
-  return out;
-}
-
-
-/*==================================================
-=                PANNEAU AGENCEMENT                =
-==================================================*/
-
+/*AGENCEMENTS*/
 function renderAgencementPanel(panel, ag, { byFragId, byBldId } = {}) {
   panel.innerHTML = '';
 
@@ -4056,29 +4427,525 @@ function renderAgencementPanel(panel, ag, { byFragId, byBldId } = {}) {
   panel.appendChild(actions);
 }
 
-/*==================================================
-=                PANNEAU DISCOURS                  =
-==================================================*/
-function renderDiscoursePanel(panel, props) {
-  panel.innerHTML = '';
-  const h2 = document.createElement('h2'); h2.textContent = props.id || 'Discours';
-  const pA = document.createElement('p'); pA.innerHTML = `<strong>Auteur :</strong> ${props.auteur || ''}`;
-  const pD = document.createElement('p'); pD.innerHTML = `<strong>Date :</strong> ${props.date || ''}`;
-  const pS = document.createElement('p');
-  const src = props.source || '';
-  pS.innerHTML = `<strong>Source :</strong> ${ src && String(src).startsWith('http') ? `<a href="${src}" target="_blank">${src}</a>` : src }`;
-  const pT = document.createElement('p'); pT.textContent = props.contenu || '';
-  panel.append(h2, pA, pD, pS, pT);
-}
-
-
 /* ==================================================
-   8) VUES PRINCIPALES
+  10.3 Panneaux d’objets sauvegardés
 ================================================== */
 
-/***************************************************
-=                  VUE CARTE FRAGMENTS TEMPORALITES            =
-***************************************************/
+function openSavedAgencementPanel(uid) {
+  const items = loadSavedAgencements();
+  const ag = items.find(x => x.uid === uid);
+  if (!ag) return;
+
+  openTab({
+    id: `saved-ag-${uid}`,
+    title: ag.name || ag.id,
+    kind: 'saved-agencement',
+    render: panel => renderSavedAgencementPanel(panel, ag)
+  });
+}
+
+function renderSavedAgencementPanel(panel, ag) {
+  panel.innerHTML = '';
+
+  const h2 = document.createElement('h2');
+  h2.textContent = ag.name || ag.id;
+  panel.appendChild(h2);
+
+  const meta = document.createElement('div');
+  meta.style.cssText = 'color:#aaa;font-size:12px;margin-bottom:8px';
+  const labelOrigin = ag.origin === 'generated'
+  ? 'Agencement enregistré'
+  : 'Agencement créé';
+
+meta.textContent =
+  `${labelOrigin} • Créé : ${fmtDate(ag.createdAt)} • Fragments : ${ag.fragmentsCount} • Bâtiments : ${ag.buildingsCount}` +
+  (ag.updatedAt ? ` • Modifié : ${fmtDate(ag.updatedAt)}` : '');
+  panel.appendChild(meta);
+
+  const desc = document.createElement('p');
+  desc.textContent = ag.description || '—';
+  panel.appendChild(desc);
+
+  const hF = document.createElement('h3');
+  hF.textContent = 'Fragments';
+  panel.appendChild(hF);
+
+  const allFrags = [...(dataGeojson || []), ...(datamGeojson || [])];
+  const byFragId = new Map(allFrags.map(f => [String(f.properties?.id || '').trim(), f]));
+
+  if (!ag.fragmentIds?.length) {
+    const empty = document.createElement('div');
+    empty.style.color = '#888';
+    empty.textContent = '— Aucun fragment';
+    panel.appendChild(empty);
+  } else {
+    ag.fragmentIds.forEach(fid => {
+      const f = byFragId.get(String(fid).trim());
+
+      const row = document.createElement('div');
+      row.className = 'member-row';
+
+      const thumb = document.createElement('div');
+      thumb.className = 'member-thumb';
+
+      const p = normalizePhotos(f?.properties?.photos)[0];
+      if (p) thumb.style.backgroundImage = `url("${p}")`;
+
+      const right = document.createElement('div');
+      right.className = 'member-right';
+
+      const title = document.createElement('div');
+      title.className = 'member-title';
+      title.textContent = f?.properties?.name || fid;
+
+      const info = document.createElement('div');
+      info.className = 'member-info';
+      info.textContent = fid;
+
+      right.append(title, info);
+      row.append(thumb, right);
+
+      row.addEventListener('click', () => {
+        if (f) openFragmentWithPatternsTabs(f.properties || {});
+      });
+
+      panel.appendChild(row);
+    });
+  }
+
+  const hB = document.createElement('h3');
+  hB.textContent = 'Bâtiments';
+  panel.appendChild(hB);
+
+  const allBlds = [...(batimentsMontreuilGeojson || []), ...(batimentsToulouseGeojson || [])];
+  const byBldId = new Map(allBlds.map(b => [String(b.properties?.id || '').trim(), b]));
+
+  if (!ag.buildingIds?.length) {
+    const empty = document.createElement('div');
+    empty.style.color = '#888';
+    empty.textContent = '— Aucun bâtiment';
+    panel.appendChild(empty);
+  } else {
+    ag.buildingIds.forEach(bid => {
+      const b = byBldId.get(String(bid).trim());
+      const props = b?.properties || {};
+
+      const line = document.createElement('div');
+      line.className = 'crit-line';
+
+      const label = document.createElement('span');
+      label.className = 'crit-label';
+      label.textContent = bid;
+
+      const value = document.createElement('span');
+      value.className = 'crit-value';
+      value.textContent = `${props.fonction || props['fonction'] || '—'} • ${props['état'] || props.etat || '—'}`;
+
+      line.append(label, value);
+      panel.appendChild(line);
+    });
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'btn-row';
+
+  const bRename = document.createElement('button');
+bRename.className = 'tab-btn btn-sm';
+bRename.textContent = 'Modifier';
+bRename.onclick = () => {
+  openEditSavedAgencementModal(ag.uid);
+};
+
+  const bDelete = document.createElement('button');
+  bDelete.className = 'tab-btn btn-sm danger';
+  bDelete.textContent = 'Supprimer';
+  bDelete.onclick = () => {
+    deleteSavedAgencement(ag.uid);
+    renderSavedAgencementsOnMap();
+    const tabId = `saved-ag-${ag.uid}`;
+    if (Tabbed?.openTabs?.has(tabId)) closeTab(tabId);
+  };
+
+  actions.append(bRename, bDelete);
+  panel.appendChild(actions);
+}
+
+function openSavedPatternPanel(uid) {
+  const items = loadSavedPatterns();
+  const rec = items.find(x => x.uid === uid);
+  if (!rec) return;
+
+  openTab({
+    id: `saved-${uid}`,
+    title: rec.name || rec.patternKey,
+    kind: 'saved-pattern',
+    render: panel => renderSavedPatternPanel(panel, rec)
+  });
+}
+
+function renderSavedPatternPanel(panel, rec) {
+  panel.innerHTML = '';
+
+  const occs = getSavedPatternOccurrences(rec);
+
+  const h2 = document.createElement('h2');
+  h2.textContent = rec.name || rec.patternKey || 'Pattern enregistré';
+  panel.appendChild(h2);
+
+  const pMeta = document.createElement('p');
+  pMeta.className = 'pattern-meta';
+  pMeta.textContent =
+    `ID : ${rec.patternKey || '—'} • ${occs.length} occurrences • ` +
+    `enregistré le ${fmtDate(rec.savedAt)}` +
+    (rec.updatedAt ? ` • modifié le ${fmtDate(rec.updatedAt)}` : '');
+  panel.appendChild(pMeta);
+
+  const params = rec.params || {};
+  appendSimpleBlock(panel, 'Enregistrement / paramètres', [
+    {
+      label: 'Agencement de base',
+      value: rec.sourceAgencementId || '—'
+    },
+    {
+      label: 'Diamètre',
+      value: Number.isFinite(params.perimeterDiameterM)
+        ? `${params.perimeterDiameterM} m`
+        : '—'
+    },
+    {
+      label: 'Seuil similarité',
+      value: Number.isFinite(params.agSimilarityThreshold)
+        ? Number(params.agSimilarityThreshold).toFixed(2)
+        : '—'
+    },
+    {
+      label: 'Zones',
+      value: Array.isArray(params.zones) && params.zones.length
+        ? params.zones.join(', ')
+        : '—'
+    },
+    {
+      label: 'Critères actifs',
+      value: Array.isArray(params.activeCriteriaKeys)
+        ? String(params.activeCriteriaKeys.length)
+        : '—'
+    }
+  ]);
+
+  if (!occs.length) {
+    const msg = document.createElement('div');
+    msg.style.color = '#aaa';
+    msg.style.padding = '8px 0';
+    msg.textContent = "Aucune occurrence disponible pour ce snapshot.";
+    panel.appendChild(msg);
+
+    const actions = document.createElement('div');
+    actions.className = 'btn-row';
+
+    const bEdit = document.createElement('button');
+    bEdit.className = 'tab-btn btn-sm';
+    bEdit.textContent = 'Modifier';
+    bEdit.onclick = () => openEditSavedPatternModal(rec.uid);
+
+    const bDel = document.createElement('button');
+    bDel.className = 'tab-btn btn-sm danger';
+    bDel.textContent = 'Supprimer';
+    bDel.onclick = () => {
+      deleteSavedPattern(rec.uid);
+
+      const tabId = `saved-${rec.uid}`;
+      if (Tabbed?.openTabs?.has(tabId)) closeTab(tabId);
+
+      const listModal = document.getElementById('saved-patterns-list-modal');
+      if (listModal && listModal.style.display === 'block') {
+        openSavedPatternsListModal();
+      }
+    };
+
+    actions.append(bEdit, bDel);
+    panel.appendChild(actions);
+    return;
+  }
+
+  function compactRecurringList(items = [], { minCount = 2, maxItems = 5 } = {}) {
+    return (items || [])
+      .filter(item => Number(item.count || 0) >= minCount)
+      .slice(0, maxItems)
+      .map(item => item.label);
+  }
+
+  function compactCountRange(values = []) {
+    const nums = (values || [])
+      .map(v => Number(v))
+      .filter(Number.isFinite);
+
+    if (!nums.length) return '—';
+
+    const min = Math.min(...nums);
+    const max = Math.max(...nums);
+
+    return min === max ? `${min}` : `${min}–${max}`;
+  }
+
+  const grouping = computePatternGroupingLogic(occs);
+  const fragmentCounts = occs.map(ag => Number(ag.fragmentsCount || 0));
+  const buildingCounts = occs.map(ag => Number(ag.buildingsCount || 0));
+
+  appendSimpleBlock(panel, 'Structure récurrente', [
+    {
+      label: 'Fragments',
+      value: compactCountRange(fragmentCounts)
+    },
+    {
+      label: 'Bâtiments',
+      value: compactCountRange(buildingCounts)
+    },
+    {
+      label: 'Base',
+      value: rec.sourceAgencementId || '—'
+    }
+  ]);
+
+  appendSimpleBlock(panel, 'Grappes récurrentes', [
+    {
+      label: 'Usages',
+      value: compactRecurringList(grouping.recurringTexts.usages).join(', ') || '—'
+    },
+    {
+      label: 'Acteurs',
+      value: compactRecurringList(grouping.recurringTexts.acteur_actif).join(', ') || '—'
+    },
+    {
+      label: 'Initiateurs',
+      value: compactRecurringList(grouping.recurringTexts.initiateur).join(', ') || '—'
+    },
+    {
+      label: 'Éléments',
+      value: compactRecurringList(grouping.recurringTexts.elements_spatiaux).join(', ') || '—'
+    }
+  ]);
+
+  appendSimpleBlock(panel, 'Contexte / temporalités', [
+    {
+      label: 'Bâti',
+      value: compactRecurringList(grouping.recurringBuildingStates, { maxItems: 3 }).join(', ') || '—'
+    },
+    {
+      label: 'Fonctions',
+      value: compactRecurringList(grouping.recurringBuildingFunctions, { maxItems: 3 }).join(', ') || '—'
+    },
+    {
+      label: 'Temporalités',
+      value: compactRecurringList(grouping.recurringTemporalStatuses, { maxItems: 3 }).join(', ') || '—'
+    }
+  ]);
+
+  const list = document.createElement('div');
+  list.className = 'pattern-members';
+
+  const hList = document.createElement('h3');
+  hList.textContent = 'Occurrences';
+  list.appendChild(hList);
+
+  const byFragId = getGalleryFragmentsById();
+  const allBlds = [...(batimentsMontreuilGeojson || []), ...(batimentsToulouseGeojson || [])];
+  const byBldId = new Map(
+    allBlds.map(b => [cleanFragmentId(b.properties?.id), b])
+  );
+
+  occs.forEach(ag => {
+    const row = document.createElement('div');
+    row.className = 'member-row';
+
+    const liveAg = agencementsById.get(ag.id);
+
+    if (liveAg) {
+      row.style.cursor = 'pointer';
+    }
+
+    const thumb = document.createElement('div');
+    thumb.className = 'member-thumb';
+
+    let foundPhoto = null;
+    for (const fid of (ag.fragmentIds || [])) {
+      const f = byFragId.get(cleanFragmentId(fid));
+      if (!f) continue;
+
+      const p = normalizePhotos(f.properties?.photos)[0];
+      if (p) {
+        foundPhoto = p;
+        break;
+      }
+    }
+
+    if (foundPhoto) {
+      thumb.style.backgroundImage = `url("${foundPhoto}")`;
+    }
+
+    const right = document.createElement('div');
+    right.className = 'member-right';
+
+    const title = document.createElement('div');
+    title.className = 'member-title';
+    title.textContent = ag.name || ag.id;
+
+    const info = document.createElement('div');
+    info.className = 'member-info';
+    info.textContent = `${ag.fragmentsCount} fragments • ${ag.buildingsCount} bâtiments`;
+
+    right.append(title, info);
+    row.append(thumb, right);
+
+    if (liveAg) {
+      row.addEventListener('click', () => {
+        openTab({
+          id: `ag-${liveAg.id}`,
+          title: liveAg.name || liveAg.id,
+          kind: 'agencement',
+          render: (p) => renderAgencementPanel(p, liveAg, { byFragId, byBldId })
+        });
+      });
+    }
+
+    list.appendChild(row);
+  });
+
+  panel.appendChild(list);
+
+  const actions = document.createElement('div');
+  actions.className = 'btn-row';
+
+  const bEdit = document.createElement('button');
+  bEdit.className = 'tab-btn btn-sm';
+  bEdit.textContent = 'Modifier';
+  bEdit.onclick = () => openEditSavedPatternModal(rec.uid);
+
+  const bDel = document.createElement('button');
+  bDel.className = 'tab-btn btn-sm danger';
+  bDel.textContent = 'Supprimer';
+  bDel.onclick = () => {
+    deleteSavedPattern(rec.uid);
+
+    const tabId = `saved-${rec.uid}`;
+    if (Tabbed?.openTabs?.has(tabId)) closeTab(tabId);
+
+    const listModal = document.getElementById('saved-patterns-list-modal');
+    if (listModal && listModal.style.display === 'block') {
+      openSavedPatternsListModal();
+    }
+  };
+
+  actions.append(bEdit, bDel);
+  panel.appendChild(actions);
+}
+
+function openSavedAgencementsListInPanel(panel) {
+  const items = loadSavedAgencements()
+    .slice()
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  panel.innerHTML = '';
+
+  const h2 = document.createElement('h2');
+  h2.textContent = 'Agencements';
+  panel.appendChild(h2);
+
+  if (!items.length) {
+    const empty = document.createElement('div');
+    empty.style.color = '#888';
+    empty.textContent = 'Aucun agencement enregistré.';
+    panel.appendChild(empty);
+    return;
+  }
+
+  const manualItems = items.filter(x => x.origin !== 'generated');
+  const generatedItems = items.filter(x => x.origin === 'generated');
+
+  function renderSection(titleText, arr) {
+    const title = document.createElement('h3');
+    title.textContent = titleText;
+    title.style.marginTop = '14px';
+    panel.appendChild(title);
+
+    if (!arr.length) {
+      const empty = document.createElement('div');
+      empty.style.color = '#888';
+      empty.textContent = '— Aucun';
+      panel.appendChild(empty);
+      return;
+    }
+
+    arr.forEach(ag => {
+      const row = document.createElement('div');
+      row.className = 'member-row';
+
+      const right = document.createElement('div');
+      right.className = 'member-right';
+
+      const title = document.createElement('div');
+      title.className = 'member-title';
+      title.textContent = ag.name || ag.id;
+
+      const info = document.createElement('div');
+      info.className = 'member-info';
+      info.textContent = `${ag.fragmentsCount} fragments • ${ag.buildingsCount} bâtiments • ${fmtDate(ag.createdAt)}`;
+
+      const actions = document.createElement('div');
+      actions.className = 'btn-row';
+      actions.style.marginTop = '6px';
+
+      const bOpen = document.createElement('button');
+      bOpen.className = 'tab-btn btn-sm primary';
+      bOpen.textContent = 'Consulter';
+      bOpen.onclick = (e) => {
+        e.stopPropagation();
+        openSavedAgencementPanel(ag.uid);
+      };
+
+      const bEdit = document.createElement('button');
+      bEdit.className = 'tab-btn btn-sm';
+      bEdit.textContent = 'Modifier';
+      bEdit.onclick = (e) => {
+        e.stopPropagation();
+        openEditSavedAgencementModal(ag.uid);
+      };
+
+      const bDel = document.createElement('button');
+      bDel.className = 'tab-btn btn-sm danger';
+      bDel.textContent = 'Supprimer';
+      bDel.onclick = (e) => {
+        e.stopPropagation();
+        deleteSavedAgencement(ag.uid);
+        openSavedAgencementsListInPanel(panel);
+        renderSavedAgencementsOnMap();
+
+        const tabId = `saved-ag-${ag.uid}`;
+        if (Tabbed?.openTabs?.has(tabId)) closeTab(tabId);
+      };
+
+      actions.append(bOpen, bEdit, bDel);
+      right.append(title, info, actions);
+      row.append(right);
+
+      row.addEventListener('click', () => {
+        openSavedAgencementPanel(ag.uid);
+      });
+
+      panel.appendChild(row);
+    });
+  }
+
+  renderSection('Agencements créés', manualItems);
+  renderSection('Agencements enregistrés', generatedItems);
+}
+
+/* ==================================================
+  11) VUES FRAGMENTS
+================================================== */
+
+/* ==================================================
+  11.1 Carte fragments
+================================================== */
 
 function renderFragmentsMapByTimeMode() {
   if (!fragmentLayersGroup) return;
@@ -4219,371 +5086,10 @@ const features = rawFeatures.filter(featureHasAnyActiveCriterion);
 }
 }
 
+/* ==================================================
+  11.2 Proxémie commune fragments
+================================================== */
 
-
-
-/***************************************************
-=                  VUE GALERIE            =
-***************************************************/
-
-function getGalleryFragmentsById() {
-  const source =
-    currentPatternGalleryTimeMode === 'T2'
-      ? [...(dataGeojsonT2 || []), ...(datamGeojsonT2 || [])]
-      : [...(dataGeojsonT1 || []), ...(datamGeojsonT1 || [])];
-
-  return new Map(
-    source
-      .filter(f => !f.properties?.isDiscourse && !f.properties?.isBuilding)
-      .map(f => [cleanFragmentId(f.properties?.id), f])
-  );
-}
-
-
-function getAgencementFragments(ag, byFragId) {
-  return (ag?.fragmentIds || [])
-    .map(fid => byFragId.get(cleanFragmentId(fid)))
-    .filter(Boolean);
-}
-
-function getAgencementBuildings(ag, byBldId) {
-  return (ag?.buildingIds || [])
-    .map(bid => byBldId.get(String(bid).trim()))
-    .filter(Boolean);
-}
-
-function buildGalleryFragmentCard(f, ag, byFragId, byBldId) {
-  const card = document.createElement('div');
-  card.className = 'gallery-fragment-card';
-
-  const photos = normalizePhotos(f?.properties?.photos);
-  const firstPhoto = photos[0] || null;
-
-  const media = document.createElement('div');
-  media.className = 'gallery-fragment-media';
-
-  if (firstPhoto) {
-    const img = makeImg(firstPhoto, f?.properties?.name || f?.properties?.id || 'fragment');
-    if (img) media.appendChild(img);
-  } else {
-    media.classList.add('is-empty');
-    media.textContent = 'Sans image';
-  }
-
-  const caption = document.createElement('div');
-  caption.className = 'gallery-fragment-caption';
-
-  const fragTitle = document.createElement('div');
-  fragTitle.className = 'gallery-fragment-title';
-  fragTitle.textContent = f?.properties?.id || 'Fragment';
-
-  const fragName = document.createElement('div');
-  fragName.className = 'gallery-fragment-name';
-  fragName.textContent = f?.properties?.name || '';
-
-  caption.append(fragTitle, fragName);
-  card.append(media, caption);
-
-  card.addEventListener('click', () => {
-    openTab({
-      id: `ag-${ag.id}`,
-      title: ag.name || ag.id,      kind: 'agencement',
-      render: (p) => renderAgencementPanel(p, ag, { byFragId, byBldId })
-    });
-  });
-
-  return card;
-}
-
-function buildGalleryBuildingsCell(ag, byBldId) {
-  const cell = document.createElement('div');
-  cell.className = 'gallery-buildings-cell';
-
-  const title = document.createElement('div');
-  title.className = 'gallery-buildings-title';
-  title.textContent = 'Bâtiments';
-
-  const list = document.createElement('div');
-  list.className = 'gallery-buildings-list';
-
-  const buildings = getAgencementBuildings(ag, byBldId);
-
-  if (!buildings.length) {
-    const empty = document.createElement('div');
-    empty.className = 'gallery-building-line is-empty';
-    empty.textContent = '— Aucun bâtiment';
-    list.appendChild(empty);
-  } else {
-    buildings.forEach(b => {
-      const props = b?.properties || {};
-      const line = document.createElement('div');
-      line.className = 'gallery-building-line';
-
-      const bid = props.id || '—';
-      const fonction = props.fonction || props['fonction'] || '—';
-      const etat = props['état'] || props.etat || '—';
-
-      line.textContent = `${bid} — ${fonction} — ${etat}`;
-      list.appendChild(line);
-    });
-  }
-
-  cell.append(title, list);
-  return cell;
-}
-
-function buildGalleryDiscoursesCell(ag) {
-  const cell = document.createElement('div');
-  cell.className = 'gallery-buildings-cell';
-
-  const title = document.createElement('div');
-  title.className = 'gallery-buildings-title';
-  title.textContent = 'Discours associés';
-
-  const list = document.createElement('div');
-  list.className = 'gallery-buildings-list';
-
-  const discourseMap = new Map();
-
-  (ag?.fragmentIds || []).forEach(fid => {
-    getDiscoursesForFragment(fid).forEach(feature => {
-      const did = String(feature?.properties?.id || '').trim().toUpperCase();
-      if (did) discourseMap.set(did, feature);
-    });
-  });
-
-  (ag?.buildingIds || []).forEach(bid => {
-    getDiscoursesForBuilding(bid).forEach(feature => {
-      const did = String(feature?.properties?.id || '').trim().toUpperCase();
-      if (did) discourseMap.set(did, feature);
-    });
-  });
-
-  const discourses = Array.from(discourseMap.values()).sort((a, b) => {
-    const aId = String(a?.properties?.id || '');
-    const bId = String(b?.properties?.id || '');
-    return aId.localeCompare(bId, undefined, { numeric: true });
-  });
-
-  if (!discourses.length) {
-    const empty = document.createElement('div');
-    empty.className = 'gallery-building-line is-empty';
-    empty.textContent = '— Aucun discours';
-    list.appendChild(empty);
-  } else {
-    discourses.forEach(feature => {
-      const props = feature?.properties || {};
-
-      const line = document.createElement('div');
-      line.className = 'gallery-building-line';
-      line.style.cursor = 'pointer';
-      line.textContent = `${props.id || '—'} — ${props.auteur || '—'} — ${props.source || '—'}`;
-
-      line.addEventListener('click', () => {
-        openDiscourseFromFeature(feature);
-      });
-
-      list.appendChild(line);
-    });
-  }
-
-  cell.append(title, list);
-  return cell;
-}
-
-function getFragmentSimilarityScore(fa, fb) {
-  if (!fa || !fb) return -1;
-  const va = featureToVector(fa);
-  const vb = featureToVector(fb);
-  return similarityFuzzy(va, vb);
-}
-
-function orderFragmentsByReference(referenceFrags, candidateFrags) {
-  const remaining = [...candidateFrags];
-  const ordered = [];
-
-  // 1) on aligne d'abord sur les fragments de référence
-  referenceFrags.forEach(refFrag => {
-    if (!remaining.length) {
-      ordered.push(null);
-      return;
-    }
-
-    let bestIdx = -1;
-    let bestScore = -1;
-
-    remaining.forEach((candFrag, idx) => {
-      const s = getFragmentSimilarityScore(refFrag, candFrag);
-      if (s > bestScore) {
-        bestScore = s;
-        bestIdx = idx;
-      }
-    });
-
-    if (bestIdx >= 0) {
-      ordered.push(remaining[bestIdx]);
-      remaining.splice(bestIdx, 1);
-    } else {
-      ordered.push(null);
-    }
-  });
-
-  // 2) puis on ajoute les fragments restants à la fin
-  return ordered.concat(remaining);
-}
-
-function buildAlignedFragmentsByAgencement(occs, byFragId) {
-  const rawLists = occs.map(ag => getAgencementFragments(ag, byFragId));
-
-  if (!rawLists.length) return [];
-
-  // colonne de référence = premier agencement du pattern
-  const reference = rawLists[0] || [];
-
-  return rawLists.map((fragList, idx) => {
-    if (idx === 0) return [...fragList]; // la référence garde son ordre
-    return orderFragmentsByReference(reference, fragList);
-  });
-}
-
-
-
-
-
-function showGalleryView() {
-  const gallery = document.getElementById('gallery-view');
-  gallery.innerHTML = '';
-
-  const wrapper = document.createElement('div');
-  wrapper.className = 'gallery-wrapper';
-  gallery.appendChild(wrapper);
-
-  const patternsEntries = Object.entries(patterns || {});
-  if (!patternsEntries.length) {
-    const msg = document.createElement('div');
-    msg.style.color = '#aaa';
-    msg.style.padding = '10px';
-    msg.textContent = "Aucun pattern trouvé avec le seuil de similarité actuel.";
-    gallery.appendChild(msg);
-    return;
-  }
-
-  const byFragId = getGalleryFragmentsById();
-
-  const allBlds = [...(batimentsMontreuilGeojson || []), ...(batimentsToulouseGeojson || [])];
-  const byBldId = new Map(
-    allBlds.map(b => [cleanFragmentId(b.properties?.id), b])
-  );
-
-  patternsEntries.forEach(([pKey, pData]) => {
-    const occIds = (pData?.occurrences || []).slice();
-    const occs = occIds
-      .map(id => agencementsById.get(id))
-      .filter(Boolean)
-      .sort(sortAgencementsById);
-
-    if (!occs.length) return;
-
-    const block = document.createElement('section');
-    block.className = 'pattern-block';
-
-    const title = document.createElement('h3');
-    title.className = 'pattern-title';
-    title.textContent = `${pKey} — ${occs.length} agencements`;
-
-    const table = document.createElement('div');
-    table.className = 'gallery-table';
-
-    // En-tête colonnes
-    const head = document.createElement('div');
-    head.className = 'gallery-head';
-
-    occs.forEach(ag => {
-      const headCell = document.createElement('div');
-      headCell.className = 'gallery-head-cell';
-      headCell.innerHTML = `<strong>${ag.name || ag.id}</strong><br>${ag.fragmentsCount} fragments`;      head.appendChild(headCell);
-    });
-
-    table.appendChild(head);
-
-    // Prépare fragments par agencement
- const fragmentsByAg = buildAlignedFragmentsByAgencement(occs, byFragId);
-const maxRows = Math.max(...fragmentsByAg.map(arr => arr.filter(Boolean).length), 0);
-
-const colTemplate = `repeat(${occs.length}, minmax(240px, 320px))`;
-head.style.gridTemplateColumns = colTemplate;
-
-const body = document.createElement('div');
-body.className = 'gallery-body';
-
-for (let rowIndex = 0; rowIndex < maxRows; rowIndex++) {
-  const row = document.createElement('div');
-  row.className = 'gallery-row';
-  row.style.gridTemplateColumns = colTemplate;
-
-  occs.forEach((ag, colIndex) => {
-    const cell = document.createElement('div');
-    cell.className = 'gallery-cell';
-
-    const frag = fragmentsByAg[colIndex][rowIndex];
-
-    if (frag) {
-      cell.appendChild(buildGalleryFragmentCard(frag, ag, byFragId, byBldId));
-    } else {
-      cell.classList.add('is-empty');
-    }
-
-    row.appendChild(cell);
-  });
-
-  body.appendChild(row);
-}
-
-table.appendChild(body);
-
-// Ligne bâtiments
-const buildingsRow = document.createElement('div');
-buildingsRow.className = 'gallery-buildings-row';
-buildingsRow.style.gridTemplateColumns = colTemplate;
-
-occs.forEach(ag => {
-  const bCellWrap = document.createElement('div');
-  bCellWrap.className = 'gallery-buildings-wrap';
-  bCellWrap.appendChild(buildGalleryBuildingsCell(ag, byBldId));
-  buildingsRow.appendChild(bCellWrap);
-});
-
-table.appendChild(buildingsRow);
-
-// Ligne discours
-const discoursesRow = document.createElement('div');
-discoursesRow.className = 'gallery-buildings-row';
-discoursesRow.style.gridTemplateColumns = colTemplate;
-
-occs.forEach(ag => {
-  const dCellWrap = document.createElement('div');
-  dCellWrap.className = 'gallery-buildings-wrap';
-  dCellWrap.appendChild(buildGalleryDiscoursesCell(ag));
-  discoursesRow.appendChild(dCellWrap);
-});
-
-table.appendChild(discoursesRow);
-
-    block.append(title, table);
-    wrapper.appendChild(block);
-  });
-}
-
-
-
-/*==================================================
-=                  VUE PROXÉMIQUE                  =
-==================================================*/
-
-
-/***************************************************
- *  PROXÉMIE DES FRAGMENTS
- ***************************************************/
 
 function buildSharedProxemicLayout(containerEl) {
   const rect = containerEl.getBoundingClientRect();
@@ -5013,6 +5519,9 @@ function createSharedProxemicScene(
   };
 }
 
+/* ==================================================
+  11.3 Proxémie fragments seule
+================================================== */
 
 function showFragmentProxemicView() {
   fragmentProxemicView.innerHTML = "";
@@ -5187,10 +5696,389 @@ function showFragmentProxemicView() {
   });
 }
 
+function openTrajectoryFragmentTabs(pair) {
+  if (!pair) return;
 
-/***************************************************
- *  PROXÉMIE 
- ***************************************************/
+  clearAllTabbedTabs();
+  closeSidebars();
+
+  if (pair.t1) {
+    openTab({
+      id: `frag-${pair.id}-T1`,
+      title: `${pair.id} · T1`,
+      kind: 'fragment',
+      render: (panel) => renderFragmentPanel(panel, pair.t1.properties)
+    });
+  }
+
+  if (pair.t2) {
+    openTab({
+      id: `frag-${pair.id}-T2`,
+      title: `${pair.id} · T2`,
+      kind: 'fragment',
+      render: (panel) => renderFragmentPanel(panel, pair.t2.properties)
+    });
+  }
+
+  if (pair.t1) focusTab(`frag-${pair.id}-T1`);
+  else if (pair.t2) focusTab(`frag-${pair.id}-T2`);
+}
+
+/* ==================================================
+  12) VUE GALERIE
+================================================== */
+
+function getGalleryFragmentsById() {
+  const source =
+    currentPatternGalleryTimeMode === 'T2'
+      ? [...(dataGeojsonT2 || []), ...(datamGeojsonT2 || [])]
+      : [...(dataGeojsonT1 || []), ...(datamGeojsonT1 || [])];
+
+  return new Map(
+    source
+      .filter(f => !f.properties?.isDiscourse && !f.properties?.isBuilding)
+      .map(f => [cleanFragmentId(f.properties?.id), f])
+  );
+}
+
+function getAgencementFragments(ag, byFragId) {
+  return (ag?.fragmentIds || [])
+    .map(fid => byFragId.get(cleanFragmentId(fid)))
+    .filter(Boolean);
+}
+
+function getAgencementBuildings(ag, byBldId) {
+  return (ag?.buildingIds || [])
+    .map(bid => byBldId.get(String(bid).trim()))
+    .filter(Boolean);
+}
+
+function buildGalleryFragmentCard(f, ag, byFragId, byBldId) {
+  const card = document.createElement('div');
+  card.className = 'gallery-fragment-card';
+
+  const photos = normalizePhotos(f?.properties?.photos);
+  const firstPhoto = photos[0] || null;
+
+  const media = document.createElement('div');
+  media.className = 'gallery-fragment-media';
+
+  if (firstPhoto) {
+    const img = makeImg(firstPhoto, f?.properties?.name || f?.properties?.id || 'fragment');
+    if (img) media.appendChild(img);
+  } else {
+    media.classList.add('is-empty');
+    media.textContent = 'Sans image';
+  }
+
+  const caption = document.createElement('div');
+  caption.className = 'gallery-fragment-caption';
+
+  const fragTitle = document.createElement('div');
+  fragTitle.className = 'gallery-fragment-title';
+  fragTitle.textContent = f?.properties?.id || 'Fragment';
+
+  const fragName = document.createElement('div');
+  fragName.className = 'gallery-fragment-name';
+  fragName.textContent = f?.properties?.name || '';
+
+  caption.append(fragTitle, fragName);
+  card.append(media, caption);
+
+  card.addEventListener('click', () => {
+    openTab({
+      id: `ag-${ag.id}`,
+      title: ag.name || ag.id,      kind: 'agencement',
+      render: (p) => renderAgencementPanel(p, ag, { byFragId, byBldId })
+    });
+  });
+
+  return card;
+}
+
+function buildGalleryBuildingsCell(ag, byBldId) {
+  const cell = document.createElement('div');
+  cell.className = 'gallery-buildings-cell';
+
+  const title = document.createElement('div');
+  title.className = 'gallery-buildings-title';
+  title.textContent = 'Bâtiments';
+
+  const list = document.createElement('div');
+  list.className = 'gallery-buildings-list';
+
+  const buildings = getAgencementBuildings(ag, byBldId);
+
+  if (!buildings.length) {
+    const empty = document.createElement('div');
+    empty.className = 'gallery-building-line is-empty';
+    empty.textContent = '— Aucun bâtiment';
+    list.appendChild(empty);
+  } else {
+    buildings.forEach(b => {
+      const props = b?.properties || {};
+      const line = document.createElement('div');
+      line.className = 'gallery-building-line';
+
+      const bid = props.id || '—';
+      const fonction = props.fonction || props['fonction'] || '—';
+      const etat = props['état'] || props.etat || '—';
+
+      line.textContent = `${bid} — ${fonction} — ${etat}`;
+      list.appendChild(line);
+    });
+  }
+
+  cell.append(title, list);
+  return cell;
+}
+
+function buildGalleryDiscoursesCell(ag) {
+  const cell = document.createElement('div');
+  cell.className = 'gallery-buildings-cell';
+
+  const title = document.createElement('div');
+  title.className = 'gallery-buildings-title';
+  title.textContent = 'Discours associés';
+
+  const list = document.createElement('div');
+  list.className = 'gallery-buildings-list';
+
+  const discourseMap = new Map();
+
+  (ag?.fragmentIds || []).forEach(fid => {
+    getDiscoursesForFragment(fid).forEach(feature => {
+      const did = String(feature?.properties?.id || '').trim().toUpperCase();
+      if (did) discourseMap.set(did, feature);
+    });
+  });
+
+  (ag?.buildingIds || []).forEach(bid => {
+    getDiscoursesForBuilding(bid).forEach(feature => {
+      const did = String(feature?.properties?.id || '').trim().toUpperCase();
+      if (did) discourseMap.set(did, feature);
+    });
+  });
+
+  const discourses = Array.from(discourseMap.values()).sort((a, b) => {
+    const aId = String(a?.properties?.id || '');
+    const bId = String(b?.properties?.id || '');
+    return aId.localeCompare(bId, undefined, { numeric: true });
+  });
+
+  if (!discourses.length) {
+    const empty = document.createElement('div');
+    empty.className = 'gallery-building-line is-empty';
+    empty.textContent = '— Aucun discours';
+    list.appendChild(empty);
+  } else {
+    discourses.forEach(feature => {
+      const props = feature?.properties || {};
+
+      const line = document.createElement('div');
+      line.className = 'gallery-building-line';
+      line.style.cursor = 'pointer';
+      line.textContent = `${props.id || '—'} — ${props.auteur || '—'} — ${props.source || '—'}`;
+
+      line.addEventListener('click', () => {
+        openDiscourseFromFeature(feature);
+      });
+
+      list.appendChild(line);
+    });
+  }
+
+  cell.append(title, list);
+  return cell;
+}
+
+function getFragmentSimilarityScore(fa, fb) {
+  if (!fa || !fb) return -1;
+  const va = featureToVector(fa);
+  const vb = featureToVector(fb);
+  return similarityFuzzy(va, vb);
+}
+
+function orderFragmentsByReference(referenceFrags, candidateFrags) {
+  const remaining = [...candidateFrags];
+  const ordered = [];
+
+  // 1) on aligne d'abord sur les fragments de référence
+  referenceFrags.forEach(refFrag => {
+    if (!remaining.length) {
+      ordered.push(null);
+      return;
+    }
+
+    let bestIdx = -1;
+    let bestScore = -1;
+
+    remaining.forEach((candFrag, idx) => {
+      const s = getFragmentSimilarityScore(refFrag, candFrag);
+      if (s > bestScore) {
+        bestScore = s;
+        bestIdx = idx;
+      }
+    });
+
+    if (bestIdx >= 0) {
+      ordered.push(remaining[bestIdx]);
+      remaining.splice(bestIdx, 1);
+    } else {
+      ordered.push(null);
+    }
+  });
+
+  // 2) puis on ajoute les fragments restants à la fin
+  return ordered.concat(remaining);
+}
+
+function buildAlignedFragmentsByAgencement(occs, byFragId) {
+  const rawLists = occs.map(ag => getAgencementFragments(ag, byFragId));
+
+  if (!rawLists.length) return [];
+
+  // colonne de référence = premier agencement du pattern
+  const reference = rawLists[0] || [];
+
+  return rawLists.map((fragList, idx) => {
+    if (idx === 0) return [...fragList]; // la référence garde son ordre
+    return orderFragmentsByReference(reference, fragList);
+  });
+}
+
+function showGalleryView() {
+  const gallery = document.getElementById('gallery-view');
+  gallery.innerHTML = '';
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'gallery-wrapper';
+  gallery.appendChild(wrapper);
+
+  const patternsEntries = Object.entries(patterns || {});
+  if (!patternsEntries.length) {
+    const msg = document.createElement('div');
+    msg.style.color = '#aaa';
+    msg.style.padding = '10px';
+    msg.textContent = "Aucun pattern trouvé avec le seuil de similarité actuel.";
+    gallery.appendChild(msg);
+    return;
+  }
+
+  const byFragId = getGalleryFragmentsById();
+
+  const allBlds = [...(batimentsMontreuilGeojson || []), ...(batimentsToulouseGeojson || [])];
+  const byBldId = new Map(
+    allBlds.map(b => [cleanFragmentId(b.properties?.id), b])
+  );
+
+  patternsEntries.forEach(([pKey, pData]) => {
+    const occIds = (pData?.occurrences || []).slice();
+    const occs = occIds
+      .map(id => agencementsById.get(id))
+      .filter(Boolean)
+      .sort(sortAgencementsById);
+
+    if (!occs.length) return;
+
+    const block = document.createElement('section');
+    block.className = 'pattern-block';
+
+    const title = document.createElement('h3');
+    title.className = 'pattern-title';
+    title.textContent = `${pKey} — ${occs.length} agencements`;
+
+    const table = document.createElement('div');
+    table.className = 'gallery-table';
+
+    // En-tête colonnes
+    const head = document.createElement('div');
+    head.className = 'gallery-head';
+
+    occs.forEach(ag => {
+      const headCell = document.createElement('div');
+      headCell.className = 'gallery-head-cell';
+      headCell.innerHTML = `<strong>${ag.name || ag.id}</strong><br>${ag.fragmentsCount} fragments`;      head.appendChild(headCell);
+    });
+
+    table.appendChild(head);
+
+    // Prépare fragments par agencement
+ const fragmentsByAg = buildAlignedFragmentsByAgencement(occs, byFragId);
+const maxRows = Math.max(...fragmentsByAg.map(arr => arr.filter(Boolean).length), 0);
+
+const colTemplate = `repeat(${occs.length}, minmax(240px, 320px))`;
+head.style.gridTemplateColumns = colTemplate;
+
+const body = document.createElement('div');
+body.className = 'gallery-body';
+
+for (let rowIndex = 0; rowIndex < maxRows; rowIndex++) {
+  const row = document.createElement('div');
+  row.className = 'gallery-row';
+  row.style.gridTemplateColumns = colTemplate;
+
+  occs.forEach((ag, colIndex) => {
+    const cell = document.createElement('div');
+    cell.className = 'gallery-cell';
+
+    const frag = fragmentsByAg[colIndex][rowIndex];
+
+    if (frag) {
+      cell.appendChild(buildGalleryFragmentCard(frag, ag, byFragId, byBldId));
+    } else {
+      cell.classList.add('is-empty');
+    }
+
+    row.appendChild(cell);
+  });
+
+  body.appendChild(row);
+}
+
+table.appendChild(body);
+
+// Ligne bâtiments
+const buildingsRow = document.createElement('div');
+buildingsRow.className = 'gallery-buildings-row';
+buildingsRow.style.gridTemplateColumns = colTemplate;
+
+occs.forEach(ag => {
+  const bCellWrap = document.createElement('div');
+  bCellWrap.className = 'gallery-buildings-wrap';
+  bCellWrap.appendChild(buildGalleryBuildingsCell(ag, byBldId));
+  buildingsRow.appendChild(bCellWrap);
+});
+
+table.appendChild(buildingsRow);
+
+// Ligne discours
+const discoursesRow = document.createElement('div');
+discoursesRow.className = 'gallery-buildings-row';
+discoursesRow.style.gridTemplateColumns = colTemplate;
+
+occs.forEach(ag => {
+  const dCellWrap = document.createElement('div');
+  dCellWrap.className = 'gallery-buildings-wrap';
+  dCellWrap.appendChild(buildGalleryDiscoursesCell(ag));
+  discoursesRow.appendChild(dCellWrap);
+});
+
+table.appendChild(discoursesRow);
+
+    block.append(title, table);
+    wrapper.appendChild(block);
+  });
+}
+
+
+/* ==================================================
+  13) VUES PATTERNS — PROXÉMIE ET CARTE 
+================================================== */
+
+/* ==================================================
+  13.1 Ouverture croisée fragment / pattern
+================================================== */
 
 // Ouvre l’onglet fragment + tous ses patterns associés
 function openFragmentWithPatternsTabs(fProps) {
@@ -5226,33 +6114,20 @@ function openFragmentWithPatternsTabs(fProps) {
   focusTab(fragTabId);
 }
 
-function openTrajectoryFragmentTabs(pair) {
-  if (!pair) return;
+function choosePatternKeyFromList(list, messagePrefix = 'Ce fragment appartient à plusieurs patterns :') {
+  if (!list || list.length === 0) return null;
+  if (list.length === 1) return list[0];
 
-  clearAllTabbedTabs();
-  closeSidebars();
-
-  if (pair.t1) {
-    openTab({
-      id: `frag-${pair.id}-T1`,
-      title: `${pair.id} · T1`,
-      kind: 'fragment',
-      render: (panel) => renderFragmentPanel(panel, pair.t1.properties)
-    });
-  }
-
-  if (pair.t2) {
-    openTab({
-      id: `frag-${pair.id}-T2`,
-      title: `${pair.id} · T2`,
-      kind: 'fragment',
-      render: (panel) => renderFragmentPanel(panel, pair.t2.properties)
-    });
-  }
-
-  if (pair.t1) focusTab(`frag-${pair.id}-T1`);
-  else if (pair.t2) focusTab(`frag-${pair.id}-T2`);
+  const msg = messagePrefix + '\n' + list.map((p,i)=>`${i+1}) ${p}`).join('\n') + '\nTape le numéro :';
+  const ans = window.prompt(msg, '1');
+  const idx = parseInt(ans, 10);
+  if (!Number.isFinite(idx) || idx < 1 || idx > list.length) return null;
+  return list[idx - 1];
 }
+
+/* ==================================================
+  13.2 Proxémie patterns
+================================================== */
 
 function showProxemicView() {
   if (currentPatternMode === 'agencements') {
@@ -5623,24 +6498,9 @@ function reset() {
   });
 }
 
-function choosePatternKeyFromList(list, messagePrefix = 'Ce fragment appartient à plusieurs patterns :') {
-  if (!list || list.length === 0) return null;
-  if (list.length === 1) return list[0];
-
-  const msg = messagePrefix + '\n' + list.map((p,i)=>`${i+1}) ${p}`).join('\n') + '\nTape le numéro :';
-  const ans = window.prompt(msg, '1');
-  const idx = parseInt(ans, 10);
-  if (!Number.isFinite(idx) || idx < 1 || idx > list.length) return null;
-  return list[idx - 1];
-}
-
-
 /* ==================================================
-   9) CARTES PATTERNS ET UNITÉS
+  13.3 Carte patterns — couleur, init, rendu
 ================================================== */
-/*==================================================
-=        CARTE PATTERNS : INIT + COULEURS          =
-==================================================*/
 
 function colorForPattern(pName) {
   const key = String(pName || '').trim().toUpperCase();
@@ -5669,72 +6529,7 @@ function colorForPattern(pName) {
 }
 window.colorForPattern = colorForPattern;
 
-function labelColorForPattern(pName) {
-  const hsl = colorForPattern(pName);
-  const m = hsl.match(/hsl\(\s*\d+,\s*\d+%?,\s*(\d+)%\s*\)/);
-  const L = m ? parseInt(m[1], 10) : 55;
-  return (L >= 62) ? '#000' : '#fff';
-}
 
-/* Zones actives (Montreuil/Mirail) */
-function getActiveZones() {
-  return Array.from(document.querySelectorAll('.filter-zone:checked')).map(cb => cb.value);
-}
-function isFeatureInActiveZones(f) {
-  const zones = getActiveZones();
-  const zone = f.properties?.zone || f.zone || null;
-  if (!zone) return true; // fallback
-
-  return zones.includes(zone);
-}
-
-function featureHasAnyActiveCriterion(feature) {
-  const props = feature?.properties || {};
-  if (!ACTIVE_CRITERIA_KEYS || ACTIVE_CRITERIA_KEYS.size === 0) return false;
-
-  for (const k of ALL_FUZZY_KEYS) {
-    if (!ACTIVE_CRITERIA_KEYS.has(k)) continue;
-    const v = parseFuzzy(props[k]);
-    if (v !== null) return true;
-  }
-
-  for (const k of TEXT_KEYS) {
-    if (!ACTIVE_CRITERIA_KEYS.has(k)) continue;
-    const arr = parseMultiText(props[k]);
-    if (arr && arr.length > 0) return true;
-  }
-
-  return false;
-}
-
-function getVisibleSpatialFeaturesForPatterns() {
-  const fragmentSource = getPatternBaseFeaturesForCurrentTimeMode()
-    .filter(f => !f?.properties?.isDiscourse && !f?.properties?.isBuilding);
-
-  const buildingSource = [
-    ...(batimentsMontreuilGeojson || []),
-    ...(batimentsToulouseGeojson || [])
-  ];
-
-  const visibleFragments = fragmentSource.filter(f =>
-    isFeatureInActiveZones(f) && featureHasAnyActiveCriterion(f)
-  );
-
-  const visibleBuildings = buildingSource.filter(f =>
-    !!f?.properties?.isBuilding && isFeatureInActiveZones(f)
-  );
-
-  return { visibleFragments, visibleBuildings };
-}
-
-/* Patterns auxquels appartient un fragment */
-function getPatternsForFragment(fragmentId) {
-  const id = cleanFragmentId(fragmentId);
-  return fragmentToPatternIds.get(id) || [];
-}
-
-
-/* Init carte patterns */
 function initPatternMapOnce() {
   if (patternMap) return;
 
@@ -5828,7 +6623,6 @@ function renderSavedAgencementsOnMap() {
   });
 }
 
-
 function hidePatternLayers() {
   if (!patternMap) return;
 
@@ -5865,15 +6659,6 @@ function hideAgencementLayers() {
   }
 }
 
-/* Pane par anneau (zIndex différent) */
-function ensureRingPane(ringIndex) {
-  const paneId = `pane-ring-${ringIndex}`;
-  if (patternPanes.has(paneId)) return paneId;
-  patternMap.createPane(paneId);
-  patternMap.getPane(paneId).style.zIndex = 600 + ringIndex;
-  patternPanes.set(paneId, paneId);
-  return paneId;
-}
 
 /* Fond gris : fragments visibles */
 function renderPatternBaseGrey() {
@@ -6099,8 +6884,6 @@ drawSubset(fragmentOthers, 'pane-pattern-members-polygons');
 drawSubset(fragmentPoints, 'pane-pattern-members-points');
 }
 
-
-/* Rafraîchit les anneaux colorés (patterns) */
 function refreshPatternsMap() {
   if (!patternMap || !patternOverlayGroup) return;
 
@@ -6217,7 +7000,6 @@ addPatternMemberToMap(
   });
 }
 
-
 function onPatternsMapFragmentClick(feature, patternKey) {
   if (unitCreation.active) {
     handleUnitSelection(feature, patternKey);
@@ -6233,19 +7015,13 @@ function onPatternsMapFragmentClick(feature, patternKey) {
 }
 
 
-/*==================================================
-=                 COMPARAISON                      =
-==================================================*/
+/* ==================================================
+  14) MODE COMPARAISON
+================================================== */
 
-function escapeHtml(v) {
-  return String(v ?? '').replace(/[&<>"']/g, s => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  }[s]));
-}
+/* ==================================================
+ 14.1 Builders comparaison
+================================================== */
 
 function comparisonBadgeHtml(text, tone = 'neutral') {
   const styles = {
@@ -6269,38 +7045,6 @@ function comparisonBadgeHtml(text, tone = 'neutral') {
     line-height:1.2;
     vertical-align:top;
   ">${escapeHtml(text)}</span>`;
-}
-
-function getComparisonCandidates() {
-  const out = [];
-
-  const saved = (loadSavedAgencements() || [])
-    .map(hydrateSavedAgencement)
-    .filter(ag => ag.fragmentsCount > 0 || ag.buildingsCount > 0)
-    .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true }));
-
-  saved.forEach(ag => {
-    out.push({
-      ref: `saved:${ag.uid}`,
-      label: ag.name || ag.id,
-      group: ag.origin === 'generated' ? 'Agencements enregistrés' : 'Agencements créés',
-      ag
-    });
-  });
-
-  (agencements || [])
-    .filter(ag => ag.mode === 'auto')
-    .sort(sortAgencementsById)
-    .forEach(ag => {
-      out.push({
-        ref: `generated:${ag.id}`,
-        label: ag.name || ag.id,
-        group: 'Agencements générés',
-        ag
-      });
-    });
-
-  return out;
 }
 
 function buildComparisonSelect(labelText, currentRef, candidates, onChange) {
@@ -6349,51 +7093,6 @@ function buildComparisonSelect(labelText, currentRef, candidates, onChange) {
   return wrap;
 }
 
-function getTokenArrayFromSource(obj, key) {
-  const raw = obj?.[key];
-
-  if (Array.isArray(raw)) {
-    return raw.map(normalizeToken).filter(Boolean);
-  }
-
-  return parseMultiText(raw) || [];
-}
-
-function diffTokenArrays(arrA = [], arrB = []) {
-  const A = new Set(arrA || []);
-  const B = new Set(arrB || []);
-
-  const common = [];
-  const onlyA = [];
-  const onlyB = [];
-
-  A.forEach(x => {
-    if (B.has(x)) common.push(x);
-    else onlyA.push(x);
-  });
-
-  B.forEach(x => {
-    if (!A.has(x)) onlyB.push(x);
-  });
-
-  common.sort();
-  onlyA.sort();
-  onlyB.sort();
-
-  return { common, onlyA, onlyB };
-}
-
-function fuzzyValuesEqual(a, b) {
-  if (a === null && b === null) return true;
-  if (a === null || b === null) return false;
-  return Math.abs(Number(a) - Number(b)) < 0.0001;
-}
-
-function getCommonIdSet(idsA = [], idsB = []) {
-  const B = new Set((idsB || []).map(x => String(x).trim()));
-  return new Set((idsA || []).map(x => String(x).trim()).filter(x => B.has(x)));
-}
-
 function buildIdBadgeList(ids = [], otherIds = [], side = 'A', emptyText = '—') {
   const wrap = document.createElement('div');
 
@@ -6415,29 +7114,6 @@ function buildIdBadgeList(ids = [], otherIds = [], side = 'A', emptyText = '—'
   return wrap;
 }
 
-
-function buildBadgeListFromStrings(items = [], otherItems = [], side = 'A', emptyText = '—') {
-  const wrap = document.createElement('div');
-
-  const diff = diffTokenArrays(items || [], otherItems || []);
-  const ordered = [
-    ...diff.common.map(x => ({ text: x, tone: 'common' })),
-    ...(side === 'A'
-      ? diff.onlyA.map(x => ({ text: x, tone: 'onlyA' }))
-      : diff.onlyB.map(x => ({ text: x, tone: 'onlyB' })))
-  ];
-
-  if (!ordered.length) {
-    wrap.innerHTML = comparisonBadgeHtml(emptyText, 'neutral');
-    return wrap;
-  }
-
-  wrap.innerHTML = ordered
-    .map(x => comparisonBadgeHtml(x.text, x.tone))
-    .join('');
-
-  return wrap;
-}
 
 function buildComparisonSectionTitle(text) {
   const h = document.createElement('h2');
@@ -6481,9 +7157,64 @@ function buildComparisonColumnCard(titleText, sideTone = 'A') {
   return card;
 }
 
-/* -------------------------------------------------
-   SOURCES FRAGMENTS SELON T1 / T2
-------------------------------------------------- */
+function buildParallelFieldRow(labelText, nodeLeft, nodeRight) {
+  const row = document.createElement('div');
+  row.style.cssText = `
+    display:grid;
+    grid-template-columns: 170px minmax(0, 1fr) minmax(0, 1fr);
+    gap:10px;
+    align-items:start;
+    padding:8px 0;
+    border-top:1px solid #eee;
+  `;
+
+  const label = document.createElement('div');
+  label.textContent = labelText;
+  label.style.cssText = 'font-size:12px;font-weight:700;color:#444;';
+
+  const safeLeft = nodeLeft || document.createElement('div');
+  const safeRight = nodeRight || document.createElement('div');
+
+  row.append(label, safeLeft, safeRight);
+  return row;
+}
+
+
+/* ==================================================
+ 14.2 Données comparaison
+================================================== */
+
+function getComparisonCandidates() {
+  const out = [];
+
+  const saved = (loadSavedAgencements() || [])
+    .map(hydrateSavedAgencement)
+    .filter(ag => ag.fragmentsCount > 0 || ag.buildingsCount > 0)
+    .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true }));
+
+  saved.forEach(ag => {
+    out.push({
+      ref: `saved:${ag.uid}`,
+      label: ag.name || ag.id,
+      group: ag.origin === 'generated' ? 'Agencements enregistrés' : 'Agencements créés',
+      ag
+    });
+  });
+
+  (agencements || [])
+    .filter(ag => ag.mode === 'auto')
+    .sort(sortAgencementsById)
+    .forEach(ag => {
+      out.push({
+        ref: `generated:${ag.id}`,
+        label: ag.name || ag.id,
+        group: 'Agencements générés',
+        ag
+      });
+    });
+
+  return out;
+}
 
 function getComparisonFragmentsById() {
   const source =
@@ -6519,43 +7250,9 @@ function buildLooseAlignedFragmentRows(fragsA, fragsB) {
   }));
 }
 
-/* -------------------------------------------------
-   DISCOURS
-------------------------------------------------- */
-
-function getDiscoursesForAgencement(ag) {
-  const discourseMap = new Map();
-
-  (ag?.fragmentIds || []).forEach(fid => {
-    getDiscoursesForFragment(fid).forEach(feature => {
-      const did = String(feature?.properties?.id || '').trim().toUpperCase();
-      if (did) discourseMap.set(did, feature);
-    });
-  });
-
-  (ag?.buildingIds || []).forEach(bid => {
-    getDiscoursesForBuilding(bid).forEach(feature => {
-      const did = String(feature?.properties?.id || '').trim().toUpperCase();
-      if (did) discourseMap.set(did, feature);
-    });
-  });
-
-  return Array.from(discourseMap.values()).sort((a, b) => {
-    const aId = String(a?.properties?.id || '');
-    const bId = String(b?.properties?.id || '');
-    return aId.localeCompare(bId, undefined, { numeric: true });
-  });
-}
-
-function getDiscoursesForFragmentFeature(feature) {
-  if (!feature?.properties?.id) return [];
-  return getDiscoursesForFragment(feature.properties.id) || [];
-}
-
-function getDiscoursesForBuildingFeature(feature) {
-  if (!feature?.properties?.id) return [];
-  return getDiscoursesForBuilding(feature.properties.id) || [];
-}
+/* ==================================================
+ 14.3 Discours comparaison
+================================================== */
 
 function buildDiscourseContentCard(feature, otherFeatures = [], side = 'A') {
   const props = feature?.properties || {};
@@ -6653,9 +7350,9 @@ function buildParallelDiscoursesBlock(featuresA = [], featuresB = [], titleText 
   return block;
 }
 
-/* -------------------------------------------------
-   SYNTHESE
-------------------------------------------------- */
+/* ==================================================
+ 14.4 Colonnes et sections comparaison
+================================================== */
 
 function buildComparisonGeneralColumn(ag, otherAg, side = 'A') {
   const card = buildComparisonColumnCard(ag?.name || ag?.id || '—', side);
@@ -6722,47 +7419,6 @@ function buildComparisonGeneralSection(agA, agB) {
   );
 
   return section;
-}
-
-/* -------------------------------------------------
-   COMPARATIF FRAGMENTS : VRAI PARALLELE A/B
-------------------------------------------------- */
-
-function buildParallelFieldRow(labelText, nodeLeft, nodeRight) {
-  const row = document.createElement('div');
-  row.style.cssText = `
-    display:grid;
-    grid-template-columns: 170px minmax(0, 1fr) minmax(0, 1fr);
-    gap:10px;
-    align-items:start;
-    padding:8px 0;
-    border-top:1px solid #eee;
-  `;
-
-  const label = document.createElement('div');
-  label.textContent = labelText;
-  label.style.cssText = 'font-size:12px;font-weight:700;color:#444;';
-
-  const safeLeft = nodeLeft || document.createElement('div');
-  const safeRight = nodeRight || document.createElement('div');
-
-  row.append(label, safeLeft, safeRight);
-  return row;
-}
-
-function buildBadgeColumn(items = [], tone = 'neutral', emptyText = '—') {
-  const wrap = document.createElement('div');
-
-  if (!items.length) {
-    wrap.innerHTML = comparisonBadgeHtml(emptyText, 'neutral');
-    return wrap;
-  }
-
-  wrap.innerHTML = items
-    .map(item => comparisonBadgeHtml(item, tone))
-    .join('');
-
-  return wrap;
 }
 
 function buildParallelTextComparisonBlock(featureA, featureB, titleText = 'Champs textuels') {
@@ -7043,10 +7699,6 @@ function buildComparisonFragmentsSection(agA, agB) {
   return section;
 }
 
-/* -------------------------------------------------
-   BATIMENTS
-------------------------------------------------- */
-
 function getBuildingSignatureList(buildings = []) {
   return (buildings || []).map(b => {
     const props = b?.properties || {};
@@ -7156,9 +7808,9 @@ function buildComparisonBuildingsSection(agA, agB) {
   return section;
 }
 
-/* -------------------------------------------------
-   RENDU GLOBAL
-------------------------------------------------- */
+/* ==================================================
+ 14.5 Rendu final
+================================================== */
 
 function renderComparisonView() {
   const view = document.getElementById('comparison-view');
@@ -7246,390 +7898,37 @@ function renderComparisonView() {
 }
 
 
-
 /* ==================================================
-   11/ PATTERNS SAUVEGARDES 
+ 15) MODE AGENCEMENT MANUEL
+================================================== */
+/* ==================================================
+ Général
 ================================================== */
 
-
-
-/*==================================================
-=               GESTION DES VUES (UI)              =
-==================================================*/
-
-function updateInterfaceElements(viewId) {
-  const legendBtn   = document.getElementById('toggle-legend-btn');
-  const locationBtn = document.getElementById('toggle-location-btn');
-  const discoursesToggleBox = document.getElementById('discourses-toggle-box');
-  const diffToggleBtn = document.getElementById('toggle-diffractions-btn');
-
-  if (diffToggleBtn) {
-    diffToggleBtn.style.display = (viewId === 'proxemic') ? 'block' : 'none';
-  }
-
-  const buildingsBox = document.getElementById('buildings-style-box');
-  if (buildingsBox) {
-    buildingsBox.style.display = (viewId === 'map') ? 'block' : 'none';
-  }
-
-  if (discoursesToggleBox) {
-    const showDiscoursesToggle =
-      viewId === 'map';
-
-    discoursesToggleBox.style.display = showDiscoursesToggle ? 'block' : 'none';
-  }
-
-  const wantsLegend =
-    viewId === 'fragment-proxemic' ||
-    viewId === 'proxemic' ||
-    viewId === 'gallery' ||
-    viewId === 'patterns-map';
-
-  if (legendBtn) {
-    legendBtn.style.display = wantsLegend ? 'block' : 'none';
-  }
-
-  if (locationBtn) {
-    locationBtn.style.display =
-      (viewId === 'map' || viewId === 'patterns-map' || viewId === 'unit') ? 'block' : 'none';
-  }
-
-
-    const savedPatternsBtn = document.getElementById('saved-patterns-list-btn');
-      if (savedPatternsBtn) {
-    const showSavedPatternsBtn =
-      currentPatternMode === 'patterns';
-
-    savedPatternsBtn.style.display = showSavedPatternsBtn ? 'inline-flex' : 'none';
-  }
-
-    const zonesFilterBox = document.getElementById('filters');
-      if (zonesFilterBox) {
-    const showZonesFilters =
-      viewId === 'map' ||
-      viewId === 'fragment-proxemic' ||
-      viewId === 'patterns-map' ||
-      viewId === 'proxemic' ||
-      viewId === 'gallery';
-
-    zonesFilterBox.style.display = showZonesFilters ? 'block' : 'none';
-  }
-
-  updateFragmentTimeButtonsUI();
+function resetAgencementCreation() {
+  agencementCreation.active = false;
+  agencementCreation.mode = null;
+  agencementCreation.selectedFragments.clear();
+  agencementCreation.selectedBuildings.clear();
+  agencementCreation.sourceAgencement = null;
 }
 
+function getCurrentManualAgencement() {
+  const fragments = Array.from(agencementCreation.selectedFragments.values());
+  const buildings = Array.from(agencementCreation.selectedBuildings.values());
 
-
-(function initBuildingsStyleRadiosOnce(){
-  const radios = document.querySelectorAll('input[name="buildings-style"]');
-  if (!radios.length) return;
-
-  radios.forEach(r => {
-    r.addEventListener('change', () => {
-      BUILDINGS_STYLE_MODE = r.value;
-      restyleBuildingsOnFragmentsMap();
-    });
-  });
-})();
-
-
-
-
-const topTabs = document.querySelectorAll('.top-tab');
-const subnav = document.getElementById('subnav-patterns');
-const subnavUnit = document.getElementById('subnav-unit');
-const subnavFragments = document.getElementById('subnav-fragments');
-const patternModeTabs = document.querySelectorAll('.pattern-mode-tab');
-const patternViewTabs = document.querySelectorAll('.pattern-view-tab');
-const subnavPatternsLevel3 = document.getElementById('subnav-patterns-level3');
-const fragmentSubTabs = document.querySelectorAll('.sub-tab-fragment');
-
-const VIEWS = {
-  top: {
-    fragments: 'map',
-    patterns: 'patterns-map',
-    unit: 'unit-view'
-  }
-};
-
-const PATTERN_VIEW_TO_DOM = {
-  map: 'patterns-map',
-  proxemic: 'proxemic-view',
-  gallery: 'gallery-view'
-};
-
-function showView(viewId) {
-  document.querySelectorAll('.view').forEach(v => {
-    if (!v) return;
-    v.style.display = 'none';
-    v.classList.remove('active');
-  });
-
-  const target = document.getElementById(viewId);
-  if (target) {
-    target.style.display = 'block';
-    target.classList.add('active');
-  }
-
-  if (viewId === 'map' && map?.invalidateSize) {
-    setTimeout(() => map.invalidateSize(), 0);
-  }
-
-  if (viewId === 'patterns-map' && patternMap?.invalidateSize) {
-    setTimeout(() => patternMap.invalidateSize(), 0);
-  }
-
-  if (viewId === 'unit-view' && unitMap?.invalidateSize) {
-    setTimeout(() => unitMap.invalidateSize(), 0);
-  }
+  return {
+    id: 'AG_MANUAL_1',
+    mode: 'manual',
+    fragments,
+    buildings,
+    fragmentIds: fragments.map(f => String(f.properties?.id || '').trim()).sort(),
+    buildingIds: buildings.map(b => String(b.properties?.id || '').trim()).sort(),
+    fragmentsCount: fragments.length,
+    buildingsCount: buildings.length
+  };
 }
 
-
-function setFragmentSubTab(name) {
-  currentFragmentSub = name;
-
-  fragmentSubTabs.forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.fragmentSub === name);
-  });
-
-  if (name === 'map') {
-    currentView = 'map';
-    showView('map');
-  } else if (name === 'proxemic') {
-    currentView = 'fragment-proxemic';
-    showView('fragment-proxemic-view');
-    showFragmentProxemicView();
-  }
-
-  updateInterfaceElements(currentView);
-}
-
-
-function setTopTab(name) {
-  topTabs.forEach(btn => btn.classList.toggle('active', btn.dataset.top === name));
-
-  if (subnavFragments) {
-    subnavFragments.classList.toggle('subnav--inactive', name !== 'fragments');
-  }
-
-  if (name === 'fragments') {
-  subnav.classList.add('subnav--inactive');
-  if (subnavUnit) subnavUnit.classList.add('subnav--inactive');
-  if (subnavPatternsLevel3) subnavPatternsLevel3.classList.add('subnav--inactive');
-  if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.remove('subnav--inactive');
-
-  setFragmentSubTab(currentFragmentSub || 'map');
-}
-
-  else if (name === 'patterns') {
-  subnav.classList.remove('subnav--inactive');
-  if (subnavPatternsLevel3) subnavPatternsLevel3.classList.remove('subnav--inactive');
-  if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.add('subnav--inactive');
-  if (subnavUnit) subnavUnit.classList.add('subnav--inactive');
-  if (subnavFragments) subnavFragments.classList.add('subnav--inactive');
-
-  setPatternModeTab(currentPatternMode || 'agencements');
-}
-
-  else if (name === 'unit') {
-  subnav.classList.add('subnav--inactive');
-  if (subnavFragments) subnavFragments.classList.add('subnav--inactive');
-  if (subnavUnit) subnavUnit.classList.remove('subnav--inactive');
-  if (subnavPatternsLevel3) subnavPatternsLevel3.classList.add('subnav--inactive');
-  if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.remove('subnav--inactive');
-
-  currentView = 'unit';
-  showView('unit-view');
-  ensureUnitMap();
-  if (!unitContext) renderAllUnits();
-
-  setUnitSubTab(currentUnitSub || 'map');
-  updateInterfaceElements(currentView);
-}
-
-  if (unitCreation.active && name !== 'patterns') stopUnitCreation();
-}
-
-
-function setPatternModeTab(mode) {
-  currentPatternMode = mode;
-
-  patternModeTabs.forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.patternMode === mode);
-  });
-
-  const agencementControls = document.getElementById('agencement-controls');
-
-  // ----- CAS COMPARAISON : vue autonome, sans niveau 3 -----
-if (mode === 'comparison') {
-  if (subnavPatternsLevel3) {
-    subnavPatternsLevel3.classList.add('subnav--inactive');
-  }
-
-  if (subnavPlaceholderLevel3) {
-    subnavPlaceholderLevel3.classList.add('subnav--inactive');
-  }
-
-  document.querySelectorAll('.pattern-gallery-tab').forEach(btn => {
-    btn.style.display = 'none';
-  });
-
-  if (agencementControls) {
-    agencementControls.style.display = 'none';
-  }
-
-  currentView = 'comparison';
-  showView('comparison-view');
-  renderComparisonView();
-  updateInterfaceElements(currentView);
-  return;
-}
-
-  // ----- AUTRES MODES : logique existante -----
-  if (subnavPatternsLevel3) subnavPatternsLevel3.classList.remove('subnav--inactive');
-  if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.add('subnav--inactive');
-
-  document.querySelectorAll('.pattern-gallery-tab').forEach(btn => {
-    btn.style.display = (mode === 'patterns') ? 'inline-flex' : 'none';
-  });
-
-  if (mode === 'patterns') {
-    const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
-    recomputeAgencementPatterns({
-      fragments: visibleFragments,
-      buildings: visibleBuildings
-    });
-  }
-
-  if (mode !== 'patterns' && currentPatternView === 'gallery') {
-    currentPatternView = 'map';
-  }
-
-  if (agencementControls) {
-    agencementControls.style.display =
-      (mode === 'patterns' || mode === 'agencements') ? 'block' : 'none';
-  }
-
-  setPatternViewTab(currentPatternView || 'map');
-}
-
-function setPatternViewTab(viewName) {
-  if (currentPatternMode === 'comparison') return;
-  currentPatternView = viewName;
-
-  patternViewTabs.forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.patternView === viewName);
-  });
-
-  const domView = PATTERN_VIEW_TO_DOM[viewName];
-  if (!domView) return;
-
-  // comparaison : pour l'instant on réutilise la carte/proxémie existantes, galerie vide/inaccessible
-  if (currentPatternMode === 'comparison' && viewName === 'gallery') {
-    currentPatternView = 'map';
-    return setPatternViewTab('map');
-  }
-
-  if (unitCreation.active) {
-    const ok =
-      (unitCreation.mode === 'map' && viewName === 'map') ||
-      (unitCreation.mode === 'proxemic' && viewName === 'proxemic');
-
-    if (!ok) stopUnitCreation();
-  }
-
-  if (viewName === 'map') currentView = 'patterns-map';
-  else if (viewName === 'proxemic') currentView = 'proxemic';
-  else if (viewName === 'gallery') currentView = 'gallery';
-
-  showView(domView);
-
-if (viewName === 'map') {
-  initPatternMapOnce();
-  setTimeout(() => patternMap?.invalidateSize?.(), 0);
-
-  renderPatternBaseGrey();
-
-  if (currentPatternMode === 'patterns') {
-    hideAgencementLayers();
-    refreshPatternsMap();
-  } else if (currentPatternMode === 'agencements') {
-    hidePatternLayers();
-    refreshAgencementSelectionMap();
-    renderSavedAgencementsOnMap();
-  }
-}
-
-if (viewName === 'proxemic') {
-  showProxemicView();
-} else if (viewName === 'gallery') {
-  if (currentPatternMode === 'patterns') {
-    showGalleryView();
-  } else {
-    const gallery = document.getElementById('gallery-view');
-    if (gallery) gallery.innerHTML = "<div style='padding:24px;font-family:Consolas,monospace;'>Vide pour l’instant.</div>";
-  }
-}
-  updateInterfaceElements(currentView);
-}
-
-function setUnitSubTab(name) {
-  currentUnitSub = name;
-
-  const subBtns = document.querySelectorAll('.sub-tab-unit');
-  subBtns.forEach(b => b.classList.toggle('active', b.dataset.unitSub === name));
-
-  const elMap = document.getElementById('unit-map');
-  const elProx = document.getElementById('unit-proxemic');
-
-  if (!elMap || !elProx) return;
-
-  elMap.style.display = (name === 'map') ? 'block' : 'none';
-  elProx.style.display = (name === 'proxemic') ? 'block' : 'none';
-
-  if (name === 'map') {
-    ensureUnitMap();
-    setTimeout(() => unitMap?.invalidateSize?.(), 0);
-    // si on a un contexte, on le (re)rend
-    if (unitContext) renderUnitPatternContextOnUnitMap(unitContext.patternKey, unitContext.sourceFragmentId);
-  } else {
-    if (unitContext) renderUnitProxemicPattern(unitContext.patternKey, unitContext.sourceFragmentId);
-  }
-}
-
-// listeners (à faire une fois)
-(function initUnitSubnavOnce(){
-  const subnavUnit = document.getElementById('subnav-unit');
-  if (!subnavUnit) return;
-
-  subnavUnit.querySelectorAll('.sub-tab-unit').forEach(btn => {
-    btn.addEventListener('click', () => setUnitSubTab(btn.dataset.unitSub));
-  });
-})();
-
-
-
-// Listeners onglets
-topTabs.forEach(btn => btn.addEventListener('click', () => setTopTab(btn.dataset.top)));
-patternModeTabs.forEach(btn => {
-  btn.addEventListener('click', () => setPatternModeTab(btn.dataset.patternMode));
-});
-
-patternViewTabs.forEach(btn => {
-  btn.addEventListener('click', () => setPatternViewTab(btn.dataset.patternView));
-});
-fragmentSubTabs.forEach(btn => {
-  btn.addEventListener('click', () => setFragmentSubTab(btn.dataset.fragmentSub));
-});
-
-// État initial
-setTopTab('fragments');
-setFragmentSubTab('map');
-restyleBuildingsOnFragmentsMap();
-
-/*==================================================
-=          NOUVELLES FONCTIONS AGENCEMENTS         =
-==================================================*/
 
 function updateAgencementCreationButtons(ag) {
   const clearBtn = document.getElementById('clear-agencement-btn');
@@ -7914,86 +8213,6 @@ const saved = {
   openSavedAgencementPanel(saved.uid);
 }
 
-function renderManualAgencementPanel(panel, ag) {
-  panel.innerHTML = '';
-
-  const h2 = document.createElement('h2');
-  h2.textContent = 'Agencement en cours';
-
-  const meta = document.createElement('p');
-  meta.innerHTML = `<strong>${ag.fragmentsCount}</strong> fragments • <strong>${ag.buildingsCount}</strong> bâtiments`;
-
-  panel.append(h2, meta);
-
-  const hF = document.createElement('h3');
-  hF.textContent = 'Fragments sélectionnés';
-  panel.appendChild(hF);
-
-  if (!ag.fragments.length) {
-    const empty = document.createElement('div');
-    empty.style.color = '#888';
-    empty.textContent = '— Aucun fragment';
-    panel.appendChild(empty);
-  } else {
-    ag.fragments.forEach(f => {
-      const row = document.createElement('div');
-      row.className = 'member-row';
-
-      const thumb = document.createElement('div');
-      thumb.className = 'member-thumb';
-
-      const p = normalizePhotos(f?.properties?.photos)[0];
-      if (p) thumb.style.backgroundImage = `url("${p}")`;
-
-      const right = document.createElement('div');
-      right.className = 'member-right';
-
-      const title = document.createElement('div');
-      title.className = 'member-title';
-      title.textContent = f?.properties?.name || f?.properties?.id || 'Fragment';
-
-      const info = document.createElement('div');
-      info.className = 'member-info';
-      info.textContent = f?.properties?.id || '';
-
-      right.append(title, info);
-      row.append(thumb, right);
-
-      row.addEventListener('click', () => {
-        openFragmentWithPatternsTabs(f.properties || {});
-      });
-
-      panel.appendChild(row);
-    });
-  }
-
-  const hB = document.createElement('h3');
-  hB.textContent = 'Bâtiments sélectionnés';
-  panel.appendChild(hB);
-
-  if (!ag.buildings.length) {
-    const empty = document.createElement('div');
-    empty.style.color = '#888';
-    empty.textContent = '— Aucun bâtiment';
-    panel.appendChild(empty);
-  } else {
-    ag.buildings.forEach(b => {
-      const line = document.createElement('div');
-      line.className = 'crit-line';
-
-      const label = document.createElement('span');
-      label.className = 'crit-label';
-      label.textContent = b?.properties?.id || 'Bâtiment';
-
-      const value = document.createElement('span');
-      value.className = 'crit-value';
-      value.textContent = `${b?.properties?.fonction || '—'} • ${b?.properties?.['état'] || b?.properties?.etat || '—'}`;
-
-      line.append(label, value);
-      panel.appendChild(line);
-    });
-  }
-}
 
 function showAgencementSelectionProxemicView() {
   proxemicView.innerHTML = '';
@@ -8186,7 +8405,6 @@ function reset() {
   });
 }
 
-
 function getScreenPointsForAgencementInProxemic(ag, nodeById) {
   const pts = [];
 
@@ -8297,7 +8515,6 @@ function drawManualAgencementContourInProxemic(contourLayer, nodeById) {
     .style("pointer-events", "none");
 }
 
-
 function drawPatternOccurrenceContoursInProxemic(contoursLayer, nodeById) {
   if (!contoursLayer || !nodeById) return;
 
@@ -8358,597 +8575,13 @@ function refreshManualAgencementEverywhere() {
   }
 }
 
-
-
-
-/*==================================================
-=                 DOM                 =
-==================================================*/
-document.addEventListener('DOMContentLoaded', () => {
-  const infoBtn = document.getElementById('info-btn');
-  const aboutBox = document.getElementById('about');
-
-  function toggleAbout() {
-    const isOpen = aboutBox.style.display === 'block';
-    aboutBox.style.display = isOpen ? 'none' : 'block';
-    if (infoBtn) {
-      infoBtn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
-    }
-  }
-
-  if (infoBtn) {
-    infoBtn.addEventListener('click', toggleAbout);
-  }
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && aboutBox.style.display === 'block') {
-      toggleAbout();
-    }
-  });
-
-  document.querySelectorAll('.filter-zone').forEach(cb => {
-    cb.checked = true;
-  });
-
-  document.querySelectorAll('.crit-key').forEach(cb => {
-    cb.checked = true;
-  });
-
-  ACTIVE_CRITERIA_KEYS = new Set(ALL_CRITERIA_KEYS);
-  ACTIVE_CRITERIA_CACHE_KEY = Array.from(ACTIVE_CRITERIA_KEYS).sort().join('|');
-lastPatternComputeKey = '';
-  applyFilters();
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && agencementCreation.active) {
-    stopAgencementCreation();
-  }
-});
-
-
-/***************************************************
-=          SLIDER SEUIL DE SIMILARITÉ (FUZZY)      =
-***************************************************/
-
-function debounce(fn, delay = 160) {
-  let t;
-  return function (...args) {
-    clearTimeout(t);
-    t = setTimeout(() => fn.apply(this, args), delay);
-  };
-}
-
-const sliderEl = document.getElementById('similarity-slider');
-const sliderValueEl = document.getElementById('slider-value');
-
-if (sliderEl && sliderValueEl) {
-  const initial = parseInt(sliderEl.value, 10) / 100;
-  AG_SIM_THRESHOLD = initial;
-  sliderValueEl.textContent = initial.toFixed(2);
-
-  sliderEl.addEventListener('input', e => {
-    const v = parseInt(e.target.value, 10);
-    AG_SIM_THRESHOLD = v / 100;
-    sliderValueEl.textContent = AG_SIM_THRESHOLD.toFixed(2);
-  });
-
-sliderEl.addEventListener('change', () => {
-  if (currentPatternMode !== 'patterns') return;
-
-  const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
-  recomputeAgencementPatterns({ fragments: visibleFragments, buildings: visibleBuildings });
-
-  if (currentView === 'patterns-map') {
-    refreshPatternsMap();
-  } else if (currentView === 'proxemic') {
-    showProxemicView();
-  } else if (currentView === 'gallery') {
-    showGalleryView();
-  }
-});
-}
-
-/***************************************************
-=          SLIDER PERIMETRE     =
-***************************************************/
-
-
-const perimeterEl = document.getElementById('perimeter-slider');
-const perimeterValueEl = document.getElementById('perimeter-value');
-
-if (perimeterEl && perimeterValueEl) {
-  PERIMETER_DIAMETER_M = parseInt(perimeterEl.value, 10) || PERIMETER_DIAMETER_M;
-  perimeterValueEl.textContent = String(PERIMETER_DIAMETER_M);
-
-  perimeterEl.addEventListener('input', e => {
-    const v = parseInt(e.target.value, 10);
-    if (!Number.isFinite(v)) return;
-
-    PERIMETER_DIAMETER_M = v;
-    perimeterValueEl.textContent = String(PERIMETER_DIAMETER_M);
-  });
-
-perimeterEl.addEventListener('change', () => {
-  lastPatternComputeKey = '';
-
-  const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
-  recomputeAgencementPatterns({ fragments: visibleFragments, buildings: visibleBuildings });
-
-  if (currentView === 'patterns-map') {
-    renderPatternBaseGrey();
-    if (currentPatternMode === 'patterns') {
-      refreshPatternsMap();
-    } else if (currentPatternMode === 'agencements') {
-      refreshAgencementSelectionMap();
-      renderSavedAgencementsOnMap();
-    }
-  } else if (currentView === 'proxemic') {
-    showProxemicView();
-  } else if (currentView === 'gallery') {
-    showGalleryView();
-  }
-});
-}
-
-function refreshProxemicPreserveTransform() {
-  if (currentView !== "proxemic") return;
-
-  const svg = d3.select("#proxemic-view svg");
-  const world = svg.empty() ? null : svg.select("g");
-  const oldTransform = world ? world.attr("transform") : null;
-
-  showProxemicView();
-
-  if (oldTransform) {
-    const newSvg = d3.select("#proxemic-view svg");
-    const newWorld = newSvg.select("g");
-    if (!newWorld.empty()) newWorld.attr("transform", oldTransform);
-  }
-}
-
-const diffToggleBtn = document.getElementById("toggle-diffractions-btn");
-
-
-
-function syncDiffToggleUI() {
-  if (!diffToggleBtn) return;
-  diffToggleBtn.textContent = SHOW_DIFFRACTIONS ? "Masquer les diffractions" : "Afficher les diffractions";
-}
-
-if (diffToggleBtn) {
-  diffToggleBtn.addEventListener("click", () => {
-    SHOW_DIFFRACTIONS = !SHOW_DIFFRACTIONS;
-    syncDiffToggleUI();
-    refreshProxemicPreserveTransform(); // tu l’as déjà
-  });
-}
-syncDiffToggleUI();
-
-
-
-
-/*==================================================
-=           SAVE agencements       =
-==================================================*/
-
-const SAVED_AGENCEMENTS_KEY = 'savedManualAgencementsV1';
-
-const AUTO_AGENCEMENT_NAMES_KEY = 'autoAgencementNamesV1';
-
-function loadAutoAgencementNames() {
-  try {
-    return JSON.parse(localStorage.getItem(AUTO_AGENCEMENT_NAMES_KEY) || '{}');
-  } catch (e) {
-    return {};
-  }
-}
-
-function getAutoAgencementName(agId, fallback = '') {
-  const names = loadAutoAgencementNames();
-  const val = String(names[agId] || '').trim();
-  return val || fallback;
-}
-
-function setAutoAgencementName(agId, name) {
-  const names = loadAutoAgencementNames();
-  const clean = String(name || '').trim();
-
-  if (clean) names[agId] = clean;
-  else delete names[agId];
-
-  localStorage.setItem(AUTO_AGENCEMENT_NAMES_KEY, JSON.stringify(names));
-}
-
-function loadSavedAgencements() {
-  try {
-    return JSON.parse(localStorage.getItem(SAVED_AGENCEMENTS_KEY) || '[]');
-  } catch (e) {
-    return [];
-  }
-}
-
-function saveSavedAgencements(arr) {
-  localStorage.setItem(SAVED_AGENCEMENTS_KEY, JSON.stringify(arr));
-}
-
-function addSavedAgencement(rec) {
-  const arr = loadSavedAgencements();
-  arr.push(rec);
-  saveSavedAgencements(arr);
-  hydratedSavedAgencementsCache = null;
-hydratedSavedAgencementsCacheKey = '';
-}
-
-function updateSavedAgencement(uid, patch) {
-  const arr = loadSavedAgencements();
-  const i = arr.findIndex(x => x.uid === uid);
-  if (i >= 0) {
-    arr[i] = {
-      ...arr[i],
-      ...patch,
-      updatedAt: new Date().toISOString()
-    };
-    saveSavedAgencements(arr);
-    hydratedSavedAgencementsCache = null;
-hydratedSavedAgencementsCacheKey = '';
-    recomputeAgencementPatterns();
-  }
-}
-
-function deleteSavedAgencement(uid) {
-  saveSavedAgencements(loadSavedAgencements().filter(x => x.uid !== uid));
-  recomputeAgencementPatterns();
-
-  if (currentPatternMode === 'patterns' && currentView === 'patterns-map') {
-    renderPatternBaseGrey();
-    hydratedSavedAgencementsCache = null;
-hydratedSavedAgencementsCacheKey = '';
-    refreshPatternsMap();
-  }
-}
-
-
-
-function saveGeneratedAgencement(ag) {
-  if (!ag) return;
-
-  const existing = loadSavedAgencements().find(x =>
-    x.origin === 'generated' &&
-    sameFragmentSet(x.fragmentIds || [], ag.fragmentIds || []) &&
-    sameFragmentSet(x.buildingIds || [], ag.buildingIds || [])
-  );
-
-  if (existing) {
-    openSavedAgencementPanel(existing.uid);
-    return;
-  }
-
-  const contourLatLngs =
-    getAgencementContourLatLngs(ag) ||
-    buildAgencementBoundsLatLngs(ag);
-
-  const generatedCount = loadSavedAgencements()
-    .filter(x => x.origin === 'generated').length;
-
-  const saved = {
-    uid: 'ag_saved_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-    id: ag.id || `AX${generatedCount + 1}`,
-    name: ag.name || ag.id || `AX${generatedCount + 1}`,
-    description: '',
-    createdAt: new Date().toISOString(),
-
-    fragmentIds: (ag.fragmentIds || []).slice(),
-    buildingIds: (ag.buildingIds || []).slice(),
-    fragmentsCount: ag.fragmentsCount || (ag.fragmentIds || []).length,
-    buildingsCount: ag.buildingsCount || (ag.buildingIds || []).length,
-
-    contour: contourLatLngs
-      ? contourLatLngs.map(ll => [ll.lat, ll.lng])
-      : null,
-
-    origin: 'generated',
-    seedable: false,
-    sourceSeedId: ag.sourceSeedId || null
-  };
-
-  addSavedAgencement(saved);
-  refreshAgencementDisplays();
-  renderSavedAgencementsOnMap();
-  openSavedAgencementPanel(saved.uid);
-}
-
-
-
-
-/* CONTOUR */
-
-function extractFeatureLatLngs(feature) {
-  const out = [];
-  const geom = feature?.geometry;
-  if (!geom) return out;
-
-  function walk(coords) {
-    if (!Array.isArray(coords)) return;
-
-    // cas [lng, lat]
-    if (
-      coords.length >= 2 &&
-      typeof coords[0] === 'number' &&
-      typeof coords[1] === 'number'
-    ) {
-      const lng = Number(coords[0]);
-      const lat = Number(coords[1]);
-
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        out.push(L.latLng(lat, lng));
-      }
-      return;
-    }
-
-    coords.forEach(walk);
-  }
-
-  walk(geom.coordinates);
-  return out;
-}
-
-function dedupeLatLngs(latlngs, precision = 6) {
-  const seen = new Set();
-  const out = [];
-
-  (latlngs || []).forEach(ll => {
-    if (!ll) return;
-    const key = `${Number(ll.lat).toFixed(precision)},${Number(ll.lng).toFixed(precision)}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push(ll);
-  });
-
-  return out;
-}
-
-function cross2D(o, a, b) {
-  return (a.lng - o.lng) * (b.lat - o.lat) - (a.lat - o.lat) * (b.lng - o.lng);
-}
-
-function computeConvexHullLatLng(latlngs) {
-  const pts = dedupeLatLngs(latlngs).slice();
-
-  if (pts.length < 3) return pts;
-
-  pts.sort((p1, p2) => {
-    if (p1.lng !== p2.lng) return p1.lng - p2.lng;
-    return p1.lat - p2.lat;
-  });
-
-  const lower = [];
-  for (const p of pts) {
-    while (lower.length >= 2 && cross2D(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
-      lower.pop();
-    }
-    lower.push(p);
-  }
-
-  const upper = [];
-  for (let i = pts.length - 1; i >= 0; i--) {
-    const p = pts[i];
-    while (upper.length >= 2 && cross2D(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
-      upper.pop();
-    }
-    upper.push(p);
-  }
-
-  lower.pop();
-  upper.pop();
-
-  return lower.concat(upper);
-}
-
-function buildAgencementBoundsLatLngs(ag) {
-  const pts = [];
-
-  (ag.fragments || []).forEach(f => {
-    pts.push(...extractFeatureLatLngs(f));
-  });
-
-  (ag.buildings || []).forEach(b => {
-    pts.push(...extractFeatureLatLngs(b));
-  });
-
-  const uniquePts = dedupeLatLngs(pts);
-
-  if (!uniquePts.length) return null;
-
-  // 1 seul point
-  if (uniquePts.length === 1) {
-    const c = uniquePts[0];
-    const d = 0.00004;
-    return [
-      L.latLng(c.lat + d, c.lng - d),
-      L.latLng(c.lat + d, c.lng + d),
-      L.latLng(c.lat - d, c.lng + d),
-      L.latLng(c.lat - d, c.lng - d)
-    ];
-  }
-
-  // 2 points -> petit losange allongé
-  if (uniquePts.length === 2) {
-    const a = uniquePts[0];
-    const b = uniquePts[1];
-
-    const midLat = (a.lat + b.lat) / 2;
-    const midLng = (a.lng + b.lng) / 2;
-
-    const dx = b.lng - a.lng;
-    const dy = b.lat - a.lat;
-    const len = Math.sqrt(dx * dx + dy * dy) || 1;
-
-    const nx = -dy / len;
-    const ny = dx / len;
-
-    const pad = 0.00005;
-
-    return [
-      L.latLng(a.lat + ny * pad, a.lng + nx * pad),
-      L.latLng(b.lat + ny * pad, b.lng + nx * pad),
-      L.latLng(b.lat - ny * pad, b.lng - nx * pad),
-      L.latLng(a.lat - ny * pad, a.lng - nx * pad)
-    ];
-  }
-
-  return computeConvexHullLatLng(uniquePts);
-}
-
-function openSavedAgencementPanel(uid) {
-  const items = loadSavedAgencements();
-  const ag = items.find(x => x.uid === uid);
-  if (!ag) return;
-
-  openTab({
-    id: `saved-ag-${uid}`,
-    title: ag.name || ag.id,
-    kind: 'saved-agencement',
-    render: panel => renderSavedAgencementPanel(panel, ag)
-  });
-}
-
-function renderSavedAgencementPanel(panel, ag) {
-  panel.innerHTML = '';
-
-  const h2 = document.createElement('h2');
-  h2.textContent = ag.name || ag.id;
-  panel.appendChild(h2);
-
-  const meta = document.createElement('div');
-  meta.style.cssText = 'color:#aaa;font-size:12px;margin-bottom:8px';
-  const labelOrigin = ag.origin === 'generated'
-  ? 'Agencement enregistré'
-  : 'Agencement créé';
-
-meta.textContent =
-  `${labelOrigin} • Créé : ${fmtDate(ag.createdAt)} • Fragments : ${ag.fragmentsCount} • Bâtiments : ${ag.buildingsCount}` +
-  (ag.updatedAt ? ` • Modifié : ${fmtDate(ag.updatedAt)}` : '');
-  panel.appendChild(meta);
-
-  const desc = document.createElement('p');
-  desc.textContent = ag.description || '—';
-  panel.appendChild(desc);
-
-  const hF = document.createElement('h3');
-  hF.textContent = 'Fragments';
-  panel.appendChild(hF);
-
-  const allFrags = [...(dataGeojson || []), ...(datamGeojson || [])];
-  const byFragId = new Map(allFrags.map(f => [String(f.properties?.id || '').trim(), f]));
-
-  if (!ag.fragmentIds?.length) {
-    const empty = document.createElement('div');
-    empty.style.color = '#888';
-    empty.textContent = '— Aucun fragment';
-    panel.appendChild(empty);
-  } else {
-    ag.fragmentIds.forEach(fid => {
-      const f = byFragId.get(String(fid).trim());
-
-      const row = document.createElement('div');
-      row.className = 'member-row';
-
-      const thumb = document.createElement('div');
-      thumb.className = 'member-thumb';
-
-      const p = normalizePhotos(f?.properties?.photos)[0];
-      if (p) thumb.style.backgroundImage = `url("${p}")`;
-
-      const right = document.createElement('div');
-      right.className = 'member-right';
-
-      const title = document.createElement('div');
-      title.className = 'member-title';
-      title.textContent = f?.properties?.name || fid;
-
-      const info = document.createElement('div');
-      info.className = 'member-info';
-      info.textContent = fid;
-
-      right.append(title, info);
-      row.append(thumb, right);
-
-      row.addEventListener('click', () => {
-        if (f) openFragmentWithPatternsTabs(f.properties || {});
-      });
-
-      panel.appendChild(row);
-    });
-  }
-
-  const hB = document.createElement('h3');
-  hB.textContent = 'Bâtiments';
-  panel.appendChild(hB);
-
-  const allBlds = [...(batimentsMontreuilGeojson || []), ...(batimentsToulouseGeojson || [])];
-  const byBldId = new Map(allBlds.map(b => [String(b.properties?.id || '').trim(), b]));
-
-  if (!ag.buildingIds?.length) {
-    const empty = document.createElement('div');
-    empty.style.color = '#888';
-    empty.textContent = '— Aucun bâtiment';
-    panel.appendChild(empty);
-  } else {
-    ag.buildingIds.forEach(bid => {
-      const b = byBldId.get(String(bid).trim());
-      const props = b?.properties || {};
-
-      const line = document.createElement('div');
-      line.className = 'crit-line';
-
-      const label = document.createElement('span');
-      label.className = 'crit-label';
-      label.textContent = bid;
-
-      const value = document.createElement('span');
-      value.className = 'crit-value';
-      value.textContent = `${props.fonction || props['fonction'] || '—'} • ${props['état'] || props.etat || '—'}`;
-
-      line.append(label, value);
-      panel.appendChild(line);
-    });
-  }
-
-  const actions = document.createElement('div');
-  actions.className = 'btn-row';
-
-  const bRename = document.createElement('button');
-bRename.className = 'tab-btn btn-sm';
-bRename.textContent = 'Modifier';
-bRename.onclick = () => {
-  openEditSavedAgencementModal(ag.uid);
-};
-
-  const bDelete = document.createElement('button');
-  bDelete.className = 'tab-btn btn-sm danger';
-  bDelete.textContent = 'Supprimer';
-  bDelete.onclick = () => {
-    deleteSavedAgencement(ag.uid);
-    renderSavedAgencementsOnMap();
-    const tabId = `saved-ag-${ag.uid}`;
-    if (Tabbed?.openTabs?.has(tabId)) closeTab(tabId);
-  };
-
-  actions.append(bRename, bDelete);
-  panel.appendChild(actions);
-}
-
-function openSavedAgencementsListModal() {
-  clearAllTabbedTabs();
-
-  openTab({
-    id: 'saved-agencements-list',
-    title: 'Agencements',
-    kind: 'saved-agencements-list',
-    render: panel => openSavedAgencementsListInPanel(panel)
-  });
-}
+/* ==================================================
+ 16) MODALES ET ÉDITEURS
+================================================== */
+
+/* ==================================================
+ 16.1 Édition agencements
+================================================== */
 
 function openAgencementEditor(options) {
   const {
@@ -9084,233 +8717,22 @@ function openEditComputedAgencementModal(ag) {
   });
 }
 
-function refreshAgencementDisplays() {
-  hydratedSavedAgencementsCache = null;
-  hydratedSavedAgencementsCacheKey = '';
-  lastPatternComputeKey = '';
+function openSavedAgencementsListModal() {
+  clearAllTabbedTabs();
 
-  const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
-  recomputeAgencementPatterns({
-    fragments: visibleFragments,
-    buildings: visibleBuildings
+  openTab({
+    id: 'saved-agencements-list',
+    title: 'Agencements',
+    kind: 'saved-agencements-list',
+    render: panel => openSavedAgencementsListInPanel(panel)
   });
-
-  if (currentView === 'patterns-map') {
-    renderPatternBaseGrey();
-
-    if (currentPatternMode === 'patterns') {
-      refreshPatternsMap();
-    } else if (currentPatternMode === 'agencements') {
-      refreshAgencementSelectionMap();
-      renderSavedAgencementsOnMap();
-    }
-  } else if (currentView === 'proxemic') {
-    if (currentPatternMode === 'patterns') showProxemicView();
-    else showAgencementSelectionProxemicView();
-  } else if (currentView === 'gallery') {
-    showGalleryView();
-  }
-
-  const allFrags = [...(dataGeojson || []), ...(datamGeojson || [])]
-    .filter(f => !f.properties?.isDiscourse && !f.properties?.isBuilding);
-
-  const byFragId = new Map(
-    allFrags.map(f => [String(f.properties?.id || '').trim(), f])
-  );
-
-  const allBlds = [...(batimentsMontreuilGeojson || []), ...(batimentsToulouseGeojson || [])];
-  const byBldId = new Map(
-    allBlds.map(b => [String(b.properties?.id || '').trim(), b])
-  );
-
-  Tabbed.openTabs.forEach((rec, tabId) => {
-    if (rec.kind === 'agencement') {
-      const agId = tabId.replace(/^ag-/, '');
-      const ag = agencementsById.get(agId);
-      if (!ag) return;
-
-      renderAgencementPanel(rec.panel, ag, { byFragId, byBldId });
-      rec.btn.firstChild.nodeValue = ag.name || ag.id;
-    }
-
-    if (rec.kind === 'pattern') {
-      const pKey = tabId.replace(/^pattern-/, '');
-      renderPatternPanel(rec.panel, pKey, patterns[pKey] || {});
-    }
-
-    if (rec.kind === 'saved-agencement') {
-      const uid = tabId.replace(/^saved-ag-/, '');
-      const saved = loadSavedAgencements().find(x => x.uid === uid);
-      if (!saved) return;
-
-      renderSavedAgencementPanel(rec.panel, saved);
-      rec.btn.firstChild.nodeValue = saved.name || saved.id;
-    }
-
-    if (rec.kind === 'saved-agencements-list') {
-      openSavedAgencementsListInPanel(rec.panel);
-    }
-  });
-
-  if (currentView === 'comparison') {
-  renderComparisonView();
-}
 }
 
-
-function openSavedAgencementsListInPanel(panel) {
-  const items = loadSavedAgencements()
-    .slice()
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-  panel.innerHTML = '';
-
-  const h2 = document.createElement('h2');
-  h2.textContent = 'Agencements';
-  panel.appendChild(h2);
-
-  if (!items.length) {
-    const empty = document.createElement('div');
-    empty.style.color = '#888';
-    empty.textContent = 'Aucun agencement enregistré.';
-    panel.appendChild(empty);
-    return;
-  }
-
-  const manualItems = items.filter(x => x.origin !== 'generated');
-  const generatedItems = items.filter(x => x.origin === 'generated');
-
-  function renderSection(titleText, arr) {
-    const title = document.createElement('h3');
-    title.textContent = titleText;
-    title.style.marginTop = '14px';
-    panel.appendChild(title);
-
-    if (!arr.length) {
-      const empty = document.createElement('div');
-      empty.style.color = '#888';
-      empty.textContent = '— Aucun';
-      panel.appendChild(empty);
-      return;
-    }
-
-    arr.forEach(ag => {
-      const row = document.createElement('div');
-      row.className = 'member-row';
-
-      const right = document.createElement('div');
-      right.className = 'member-right';
-
-      const title = document.createElement('div');
-      title.className = 'member-title';
-      title.textContent = ag.name || ag.id;
-
-      const info = document.createElement('div');
-      info.className = 'member-info';
-      info.textContent = `${ag.fragmentsCount} fragments • ${ag.buildingsCount} bâtiments • ${fmtDate(ag.createdAt)}`;
-
-      const actions = document.createElement('div');
-      actions.className = 'btn-row';
-      actions.style.marginTop = '6px';
-
-      const bOpen = document.createElement('button');
-      bOpen.className = 'tab-btn btn-sm primary';
-      bOpen.textContent = 'Consulter';
-      bOpen.onclick = (e) => {
-        e.stopPropagation();
-        openSavedAgencementPanel(ag.uid);
-      };
-
-      const bEdit = document.createElement('button');
-      bEdit.className = 'tab-btn btn-sm';
-      bEdit.textContent = 'Modifier';
-      bEdit.onclick = (e) => {
-        e.stopPropagation();
-        openEditSavedAgencementModal(ag.uid);
-      };
-
-      const bDel = document.createElement('button');
-      bDel.className = 'tab-btn btn-sm danger';
-      bDel.textContent = 'Supprimer';
-      bDel.onclick = (e) => {
-        e.stopPropagation();
-        deleteSavedAgencement(ag.uid);
-        openSavedAgencementsListInPanel(panel);
-        renderSavedAgencementsOnMap();
-
-        const tabId = `saved-ag-${ag.uid}`;
-        if (Tabbed?.openTabs?.has(tabId)) closeTab(tabId);
-      };
-
-      actions.append(bOpen, bEdit, bDel);
-      right.append(title, info, actions);
-      row.append(right);
-
-      row.addEventListener('click', () => {
-        openSavedAgencementPanel(ag.uid);
-      });
-
-      panel.appendChild(row);
-    });
-  }
-
-  renderSection('Agencements créés', manualItems);
-  renderSection('Agencements enregistrés', generatedItems);
-}
+/* ==================================================
+ 16.2 Édition patterns
+================================================== */
 
 
-
-/*==================================================
-=           SAVED PATTERNS (localStorage)          =
-==================================================*/
-const SAVED_PATTERNS_KEY = 'savedPatternsV2';
-
-function loadSavedPatterns(){
-  try { return JSON.parse(localStorage.getItem(SAVED_PATTERNS_KEY) || '[]'); }
-  catch(e){ return []; }
-}
-function saveSavedPatterns(arr){
-  localStorage.setItem(SAVED_PATTERNS_KEY, JSON.stringify(arr));
-}
-function addSavedPattern(rec){
-  const arr = loadSavedPatterns();
-  arr.push(rec);
-  saveSavedPatterns(arr);
-}
-function updateSavedPattern(uid, patch){
-  const arr = loadSavedPatterns();
-  const i = arr.findIndex(x => x.uid === uid);
-  if (i >= 0) { arr[i] = { ...arr[i], ...patch, updatedAt: new Date().toISOString() }; saveSavedPatterns(arr); }
-}
-function deleteSavedPattern(uid){
-  saveSavedPatterns(loadSavedPatterns().filter(x => x.uid !== uid));
-}
-function fmtDate(iso){
-  try { const d = new Date(iso); return d.toLocaleString(); } catch(e){ return iso || ''; }
-}
-
-
-/*==================================================
-=   ÉDITEUR DE PATTERN (création ET modification)  =
-==================================================*/
-
-/**
- * Ouvre la même fenêtre modale que la création, mais en mode:
- *  - "create"  : on enregistre un NOUVEAU snapshot (addSavedPattern)
- *  - "edit"    : on modifie un snapshot existant (updateSavedPattern)
- *
- * options = {
- *   mode: 'create' | 'edit',
- *   patternKey,                // string (clé P1, P7…)
- *   elements: string[],        // ids des membres
- *   criteria: object,          // critères du snapshot
- *   name: string,              // nom initial (pré-rempli)
- *   description: string,       // desc initiale (pré-remplie)
- *   onSave: (payload) => void, // callback appelé quand on confirme
- *   headerText?: string,       // (facultatif) titre personnalisé
- *   saveText?: string          // (facultatif) libellé bouton
- * }
- */
 function openPatternEditor(options) {
   const {
     mode = 'create',
@@ -9384,115 +8806,6 @@ function openPatternEditor(options) {
   modal.style.display = 'block';
 }
 
-
-
-function computeTextConsensusForIds(ids, key, byIdFeatureMap, { minRatio = 1 } = {}) {
-  // minRatio=1 => strictement commun à TOUS les fragments du pattern
-  // (tu peux repasser à 0.7 plus tard si tu veux du "quasi commun")
-
-  const counts = new Map();
-
-  // IMPORTANT : on se base sur le nombre total de fragments du pattern
-  const total = ids.length;
-  if (!total) return [];
-
-  // Si un fragment n'a pas de valeur -> pas de consensus (car pas comparable)
-  for (const id of ids) {
-    const f = byIdFeatureMap.get(id);
-    if (!f) return [];
-    const arr = parseMultiText(f.properties?.[key]); // Array<string> | null
-    if (!arr || !arr.length) return [];             // <-- clé: bloque le consensus
-
-    const uniq = new Set(arr);
-    uniq.forEach(tok => counts.set(tok, (counts.get(tok) || 0) + 1));
-  }
-
-  const threshold = Math.max(1, Math.ceil(total * minRatio));
-
-  return Array.from(counts.entries())
-    .filter(([, c]) => c >= threshold)
-    .sort((a, b) => b[1] - a[1])
-    .map(([tok]) => tok);
-}
-
-function buildSavedPatternOccurrenceSnapshot(ag, patternKey = '') {
-  if (!ag) return null;
-
-  const contourLatLngs =
-    getAgencementContourLatLngs(ag) ||
-    buildAgencementBoundsLatLngs(ag);
-
-  return {
-    uid: `spocc_${patternKey}_${ag.id}`,
-    id: ag.id || '',
-    name: ag.name || ag.id || '',
-    description: '',
-    createdAt: new Date().toISOString(),
-
-    fragmentIds: (ag.fragmentIds || []).map(x => cleanFragmentId(x)).filter(Boolean),
-    buildingIds: (ag.buildingIds || []).map(x => cleanFragmentId(x)).filter(Boolean),
-
-    fragmentsCount: Number(ag.fragmentsCount || (ag.fragmentIds || []).length || 0),
-    buildingsCount: Number(ag.buildingsCount || (ag.buildingIds || []).length || 0),
-
-    contour: contourLatLngs
-      ? contourLatLngs.map(ll => [ll.lat, ll.lng])
-      : null,
-
-    origin: 'saved-pattern-occurrence',
-    seedable: false,
-    sourceSeedId: ag.sourceSeedId || null,
-    patternIds: (ag.patternIds || []).slice()
-  };
-}
-
-function getSavedPatternOccurrences(rec) {
-  if (!rec) return [];
-
-  const snapshots = Array.isArray(rec.occurrenceSnapshots)
-    ? rec.occurrenceSnapshots
-    : [];
-
-  let occs = snapshots
-    .map(snap => hydrateSavedAgencement({
-      uid: snap.uid || snap.id || `spocc_${Math.random().toString(36).slice(2)}`,
-      id: snap.id || '',
-      name: snap.name || snap.id || '',
-      description: snap.description || '',
-      createdAt: snap.createdAt || rec.savedAt || null,
-
-      fragmentIds: Array.isArray(snap.fragmentIds) ? snap.fragmentIds.slice() : [],
-      buildingIds: Array.isArray(snap.buildingIds) ? snap.buildingIds.slice() : [],
-
-      fragmentsCount: snap.fragmentsCount || 0,
-      buildingsCount: snap.buildingsCount || 0,
-
-      contour: snap.contour || null,
-      origin: 'saved-pattern-occurrence',
-      seedable: false
-    }))
-    .filter(ag => ag && (ag.fragmentsCount > 0 || ag.buildingsCount > 0))
-    .sort(sortAgencementsById);
-
-  // compatibilité avec anciens patterns déjà enregistrés
-  if (!occs.length) {
-    occs = (rec.occurrences || [])
-      .map(id => agencementsById.get(id))
-      .filter(Boolean)
-      .sort(sortAgencementsById);
-  }
-
-  occs.forEach(ag => {
-    ag.patternIds = [rec.patternKey];
-  });
-
-  return occs;
-}
-
-
-
-
-/* --- Création : garde le même nom de fonction publique --- */
 function openSavePatternModal(patternKey, patternData) {
   const occIds = (patternData?.occurrences || []).slice();
   const occs = occIds
@@ -9540,7 +8853,6 @@ function openSavePatternModal(patternKey, patternData) {
   });
 }
 
-/* --- Édition d’un pattern SAUVEGARDÉ (par UID) --- */
 function openEditSavedPatternModal(uid) {
   const items = loadSavedPatterns();
   const rec = items.find(x => x.uid === uid);
@@ -9578,7 +8890,6 @@ function openEditSavedPatternModal(uid) {
     }
   });
 }
-
 
 function openSavedPatternsListModal() {
   const modal = document.getElementById('saved-patterns-list-modal');
@@ -9675,281 +8986,451 @@ function openSavedPatternsListModal() {
 }
 
 
-function openSavedPatternPanel(uid) {
-  const items = loadSavedPatterns();
-  const rec = items.find(x => x.uid === uid);
-  if (!rec) return;
-
-  openTab({
-    id: `saved-${uid}`,
-    title: rec.name || rec.patternKey,
-    kind: 'saved-pattern',
-    render: panel => renderSavedPatternPanel(panel, rec)
-  });
-}
-
-function renderSavedPatternPanel(panel, rec) {
-  panel.innerHTML = '';
-
-  const occs = getSavedPatternOccurrences(rec);
-
-  const h2 = document.createElement('h2');
-  h2.textContent = rec.name || rec.patternKey || 'Pattern enregistré';
-  panel.appendChild(h2);
-
-  const pMeta = document.createElement('p');
-  pMeta.className = 'pattern-meta';
-  pMeta.textContent =
-    `ID : ${rec.patternKey || '—'} • ${occs.length} occurrences • ` +
-    `enregistré le ${fmtDate(rec.savedAt)}` +
-    (rec.updatedAt ? ` • modifié le ${fmtDate(rec.updatedAt)}` : '');
-  panel.appendChild(pMeta);
-
-  const params = rec.params || {};
-  appendSimpleBlock(panel, 'Enregistrement / paramètres', [
-    {
-      label: 'Agencement de base',
-      value: rec.sourceAgencementId || '—'
-    },
-    {
-      label: 'Diamètre',
-      value: Number.isFinite(params.perimeterDiameterM)
-        ? `${params.perimeterDiameterM} m`
-        : '—'
-    },
-    {
-      label: 'Seuil similarité',
-      value: Number.isFinite(params.agSimilarityThreshold)
-        ? Number(params.agSimilarityThreshold).toFixed(2)
-        : '—'
-    },
-    {
-      label: 'Zones',
-      value: Array.isArray(params.zones) && params.zones.length
-        ? params.zones.join(', ')
-        : '—'
-    },
-    {
-      label: 'Critères actifs',
-      value: Array.isArray(params.activeCriteriaKeys)
-        ? String(params.activeCriteriaKeys.length)
-        : '—'
-    }
-  ]);
-
-  if (!occs.length) {
-    const msg = document.createElement('div');
-    msg.style.color = '#aaa';
-    msg.style.padding = '8px 0';
-    msg.textContent = "Aucune occurrence disponible pour ce snapshot.";
-    panel.appendChild(msg);
-
-    const actions = document.createElement('div');
-    actions.className = 'btn-row';
-
-    const bEdit = document.createElement('button');
-    bEdit.className = 'tab-btn btn-sm';
-    bEdit.textContent = 'Modifier';
-    bEdit.onclick = () => openEditSavedPatternModal(rec.uid);
-
-    const bDel = document.createElement('button');
-    bDel.className = 'tab-btn btn-sm danger';
-    bDel.textContent = 'Supprimer';
-    bDel.onclick = () => {
-      deleteSavedPattern(rec.uid);
-
-      const tabId = `saved-${rec.uid}`;
-      if (Tabbed?.openTabs?.has(tabId)) closeTab(tabId);
-
-      const listModal = document.getElementById('saved-patterns-list-modal');
-      if (listModal && listModal.style.display === 'block') {
-        openSavedPatternsListModal();
-      }
-    };
-
-    actions.append(bEdit, bDel);
-    panel.appendChild(actions);
-    return;
-  }
-
-  function compactRecurringList(items = [], { minCount = 2, maxItems = 5 } = {}) {
-    return (items || [])
-      .filter(item => Number(item.count || 0) >= minCount)
-      .slice(0, maxItems)
-      .map(item => item.label);
-  }
-
-  function compactCountRange(values = []) {
-    const nums = (values || [])
-      .map(v => Number(v))
-      .filter(Number.isFinite);
-
-    if (!nums.length) return '—';
-
-    const min = Math.min(...nums);
-    const max = Math.max(...nums);
-
-    return min === max ? `${min}` : `${min}–${max}`;
-  }
-
-  const grouping = computePatternGroupingLogic(occs);
-  const fragmentCounts = occs.map(ag => Number(ag.fragmentsCount || 0));
-  const buildingCounts = occs.map(ag => Number(ag.buildingsCount || 0));
-
-  appendSimpleBlock(panel, 'Structure récurrente', [
-    {
-      label: 'Fragments',
-      value: compactCountRange(fragmentCounts)
-    },
-    {
-      label: 'Bâtiments',
-      value: compactCountRange(buildingCounts)
-    },
-    {
-      label: 'Base',
-      value: rec.sourceAgencementId || '—'
-    }
-  ]);
-
-  appendSimpleBlock(panel, 'Grappes récurrentes', [
-    {
-      label: 'Usages',
-      value: compactRecurringList(grouping.recurringTexts.usages).join(', ') || '—'
-    },
-    {
-      label: 'Acteurs',
-      value: compactRecurringList(grouping.recurringTexts.acteur_actif).join(', ') || '—'
-    },
-    {
-      label: 'Initiateurs',
-      value: compactRecurringList(grouping.recurringTexts.initiateur).join(', ') || '—'
-    },
-    {
-      label: 'Éléments',
-      value: compactRecurringList(grouping.recurringTexts.elements_spatiaux).join(', ') || '—'
-    }
-  ]);
-
-  appendSimpleBlock(panel, 'Contexte / temporalités', [
-    {
-      label: 'Bâti',
-      value: compactRecurringList(grouping.recurringBuildingStates, { maxItems: 3 }).join(', ') || '—'
-    },
-    {
-      label: 'Fonctions',
-      value: compactRecurringList(grouping.recurringBuildingFunctions, { maxItems: 3 }).join(', ') || '—'
-    },
-    {
-      label: 'Temporalités',
-      value: compactRecurringList(grouping.recurringTemporalStatuses, { maxItems: 3 }).join(', ') || '—'
-    }
-  ]);
-
-  const list = document.createElement('div');
-  list.className = 'pattern-members';
-
-  const hList = document.createElement('h3');
-  hList.textContent = 'Occurrences';
-  list.appendChild(hList);
-
-  const byFragId = getGalleryFragmentsById();
-  const allBlds = [...(batimentsMontreuilGeojson || []), ...(batimentsToulouseGeojson || [])];
-  const byBldId = new Map(
-    allBlds.map(b => [cleanFragmentId(b.properties?.id), b])
-  );
-
-  occs.forEach(ag => {
-    const row = document.createElement('div');
-    row.className = 'member-row';
-
-    const liveAg = agencementsById.get(ag.id);
-
-    if (liveAg) {
-      row.style.cursor = 'pointer';
-    }
-
-    const thumb = document.createElement('div');
-    thumb.className = 'member-thumb';
-
-    let foundPhoto = null;
-    for (const fid of (ag.fragmentIds || [])) {
-      const f = byFragId.get(cleanFragmentId(fid));
-      if (!f) continue;
-
-      const p = normalizePhotos(f.properties?.photos)[0];
-      if (p) {
-        foundPhoto = p;
-        break;
-      }
-    }
-
-    if (foundPhoto) {
-      thumb.style.backgroundImage = `url("${foundPhoto}")`;
-    }
-
-    const right = document.createElement('div');
-    right.className = 'member-right';
-
-    const title = document.createElement('div');
-    title.className = 'member-title';
-    title.textContent = ag.name || ag.id;
-
-    const info = document.createElement('div');
-    info.className = 'member-info';
-    info.textContent = `${ag.fragmentsCount} fragments • ${ag.buildingsCount} bâtiments`;
-
-    right.append(title, info);
-    row.append(thumb, right);
-
-    if (liveAg) {
-      row.addEventListener('click', () => {
-        openTab({
-          id: `ag-${liveAg.id}`,
-          title: liveAg.name || liveAg.id,
-          kind: 'agencement',
-          render: (p) => renderAgencementPanel(p, liveAg, { byFragId, byBldId })
-        });
-      });
-    }
-
-    list.appendChild(row);
-  });
-
-  panel.appendChild(list);
-
-  const actions = document.createElement('div');
-  actions.className = 'btn-row';
-
-  const bEdit = document.createElement('button');
-  bEdit.className = 'tab-btn btn-sm';
-  bEdit.textContent = 'Modifier';
-  bEdit.onclick = () => openEditSavedPatternModal(rec.uid);
-
-  const bDel = document.createElement('button');
-  bDel.className = 'tab-btn btn-sm danger';
-  bDel.textContent = 'Supprimer';
-  bDel.onclick = () => {
-    deleteSavedPattern(rec.uid);
-
-    const tabId = `saved-${rec.uid}`;
-    if (Tabbed?.openTabs?.has(tabId)) closeTab(tabId);
-
-    const listModal = document.getElementById('saved-patterns-list-modal');
-    if (listModal && listModal.style.display === 'block') {
-      openSavedPatternsListModal();
-    }
-  };
-
-  actions.append(bEdit, bDel);
-  panel.appendChild(actions);
-}
-
-
-
+/* ==================================================
+ 17) NAVIGATION GÉNÉRALE ET SHELL DE L’APPLICATION
+================================================== */
 
 /* ==================================================
-   BINDINGS UI FINAUX 
+ 17.1 UI générale
 ================================================== */
+
+function updateInterfaceElements(viewId) {
+  const legendBtn   = document.getElementById('toggle-legend-btn');
+  const locationBtn = document.getElementById('toggle-location-btn');
+  const discoursesToggleBox = document.getElementById('discourses-toggle-box');
+  const diffToggleBtn = document.getElementById('toggle-diffractions-btn');
+
+  if (diffToggleBtn) {
+    diffToggleBtn.style.display = (viewId === 'proxemic') ? 'block' : 'none';
+  }
+
+  const buildingsBox = document.getElementById('buildings-style-box');
+  if (buildingsBox) {
+    buildingsBox.style.display = (viewId === 'map') ? 'block' : 'none';
+  }
+
+  if (discoursesToggleBox) {
+    const showDiscoursesToggle =
+      viewId === 'map';
+
+    discoursesToggleBox.style.display = showDiscoursesToggle ? 'block' : 'none';
+  }
+
+  const wantsLegend =
+    viewId === 'fragment-proxemic' ||
+    viewId === 'proxemic' ||
+    viewId === 'gallery' ||
+    viewId === 'patterns-map';
+
+  if (legendBtn) {
+    legendBtn.style.display = wantsLegend ? 'block' : 'none';
+  }
+
+  if (locationBtn) {
+    locationBtn.style.display =
+      (viewId === 'map' || viewId === 'patterns-map' || viewId === 'unit') ? 'block' : 'none';
+  }
+
+
+    const savedPatternsBtn = document.getElementById('saved-patterns-list-btn');
+      if (savedPatternsBtn) {
+    const showSavedPatternsBtn =
+      currentPatternMode === 'patterns';
+
+    savedPatternsBtn.style.display = showSavedPatternsBtn ? 'inline-flex' : 'none';
+  }
+
+    const zonesFilterBox = document.getElementById('filters');
+      if (zonesFilterBox) {
+    const showZonesFilters =
+      viewId === 'map' ||
+      viewId === 'fragment-proxemic' ||
+      viewId === 'patterns-map' ||
+      viewId === 'proxemic' ||
+      viewId === 'gallery';
+
+    zonesFilterBox.style.display = showZonesFilters ? 'block' : 'none';
+  }
+
+  updateFragmentTimeButtonsUI();
+}
+
+/* ==================================================
+ 17.2 Radios bâtiments — IIFE
+================================================== */
+
+(function initBuildingsStyleRadiosOnce(){
+  const radios = document.querySelectorAll('input[name="buildings-style"]');
+  if (!radios.length) return;
+
+  radios.forEach(r => {
+    r.addEventListener('change', () => {
+      BUILDINGS_STYLE_MODE = r.value;
+      restyleBuildingsOnFragmentsMap();
+    });
+  });
+})();
+
+/* ==================================================
+ 17.3 Références DOM de navigation
+================================================== */
+
+const topTabs = document.querySelectorAll('.top-tab');
+const subnav = document.getElementById('subnav-patterns');
+const subnavUnit = document.getElementById('subnav-unit');
+const subnavFragments = document.getElementById('subnav-fragments');
+const patternModeTabs = document.querySelectorAll('.pattern-mode-tab');
+const patternViewTabs = document.querySelectorAll('.pattern-view-tab');
+const subnavPatternsLevel3 = document.getElementById('subnav-patterns-level3');
+const fragmentSubTabs = document.querySelectorAll('.sub-tab-fragment');
+
+
+const PATTERN_VIEW_TO_DOM = {
+  map: 'patterns-map',
+  proxemic: 'proxemic-view',
+  gallery: 'gallery-view'
+};
+
+/* ==================================================
+ 17.4 Fonctions de navigation
+================================================== */
+
+function showView(viewId) {
+  document.querySelectorAll('.view').forEach(v => {
+    if (!v) return;
+    v.style.display = 'none';
+    v.classList.remove('active');
+  });
+
+  const target = document.getElementById(viewId);
+  if (target) {
+    target.style.display = 'block';
+    target.classList.add('active');
+  }
+
+  if (viewId === 'map' && map?.invalidateSize) {
+    setTimeout(() => map.invalidateSize(), 0);
+  }
+
+  if (viewId === 'patterns-map' && patternMap?.invalidateSize) {
+    setTimeout(() => patternMap.invalidateSize(), 0);
+  }
+
+  if (viewId === 'unit-view' && unitMap?.invalidateSize) {
+    setTimeout(() => unitMap.invalidateSize(), 0);
+  }
+}
+
+function setFragmentSubTab(name) {
+  currentFragmentSub = name;
+
+  fragmentSubTabs.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.fragmentSub === name);
+  });
+
+  if (name === 'map') {
+    currentView = 'map';
+    showView('map');
+  } else if (name === 'proxemic') {
+    currentView = 'fragment-proxemic';
+    showView('fragment-proxemic-view');
+    showFragmentProxemicView();
+  }
+
+  updateInterfaceElements(currentView);
+}
+
+function setTopTab(name) {
+  topTabs.forEach(btn => btn.classList.toggle('active', btn.dataset.top === name));
+
+  if (subnavFragments) {
+    subnavFragments.classList.toggle('subnav--inactive', name !== 'fragments');
+  }
+
+  if (name === 'fragments') {
+  subnav.classList.add('subnav--inactive');
+  if (subnavUnit) subnavUnit.classList.add('subnav--inactive');
+  if (subnavPatternsLevel3) subnavPatternsLevel3.classList.add('subnav--inactive');
+  if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.remove('subnav--inactive');
+
+  setFragmentSubTab(currentFragmentSub || 'map');
+}
+
+  else if (name === 'patterns') {
+  subnav.classList.remove('subnav--inactive');
+  if (subnavPatternsLevel3) subnavPatternsLevel3.classList.remove('subnav--inactive');
+  if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.add('subnav--inactive');
+  if (subnavUnit) subnavUnit.classList.add('subnav--inactive');
+  if (subnavFragments) subnavFragments.classList.add('subnav--inactive');
+
+  setPatternModeTab(currentPatternMode || 'agencements');
+}
+
+  else if (name === 'unit') {
+  subnav.classList.add('subnav--inactive');
+  if (subnavFragments) subnavFragments.classList.add('subnav--inactive');
+  if (subnavUnit) subnavUnit.classList.remove('subnav--inactive');
+  if (subnavPatternsLevel3) subnavPatternsLevel3.classList.add('subnav--inactive');
+  if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.remove('subnav--inactive');
+
+  currentView = 'unit';
+  showView('unit-view');
+  ensureUnitMap();
+  if (!unitContext) renderAllUnits();
+
+  setUnitSubTab(currentUnitSub || 'map');
+  updateInterfaceElements(currentView);
+}
+
+  if (unitCreation.active && name !== 'patterns') stopUnitCreation();
+}
+
+function setPatternModeTab(mode) {
+  currentPatternMode = mode;
+
+  patternModeTabs.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.patternMode === mode);
+  });
+
+  const agencementControls = document.getElementById('agencement-controls');
+
+  // ----- CAS COMPARAISON : vue autonome, sans niveau 3 -----
+if (mode === 'comparison') {
+  if (subnavPatternsLevel3) {
+    subnavPatternsLevel3.classList.add('subnav--inactive');
+  }
+
+  if (subnavPlaceholderLevel3) {
+    subnavPlaceholderLevel3.classList.add('subnav--inactive');
+  }
+
+  document.querySelectorAll('.pattern-gallery-tab').forEach(btn => {
+    btn.style.display = 'none';
+  });
+
+  if (agencementControls) {
+    agencementControls.style.display = 'none';
+  }
+
+  currentView = 'comparison';
+  showView('comparison-view');
+  renderComparisonView();
+  updateInterfaceElements(currentView);
+  return;
+}
+
+  // ----- AUTRES MODES : logique existante -----
+  if (subnavPatternsLevel3) subnavPatternsLevel3.classList.remove('subnav--inactive');
+  if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.add('subnav--inactive');
+
+  document.querySelectorAll('.pattern-gallery-tab').forEach(btn => {
+    btn.style.display = (mode === 'patterns') ? 'inline-flex' : 'none';
+  });
+
+  if (mode === 'patterns') {
+    const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
+    recomputeAgencementPatterns({
+      fragments: visibleFragments,
+      buildings: visibleBuildings
+    });
+  }
+
+  if (mode !== 'patterns' && currentPatternView === 'gallery') {
+    currentPatternView = 'map';
+  }
+
+  if (agencementControls) {
+    agencementControls.style.display =
+      (mode === 'patterns' || mode === 'agencements') ? 'block' : 'none';
+  }
+
+  setPatternViewTab(currentPatternView || 'map');
+}
+
+function setPatternViewTab(viewName) {
+  if (currentPatternMode === 'comparison') return;
+  currentPatternView = viewName;
+
+  patternViewTabs.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.patternView === viewName);
+  });
+
+  const domView = PATTERN_VIEW_TO_DOM[viewName];
+  if (!domView) return;
+
+  // comparaison : pour l'instant on réutilise la carte/proxémie existantes, galerie vide/inaccessible
+  if (currentPatternMode === 'comparison' && viewName === 'gallery') {
+    currentPatternView = 'map';
+    return setPatternViewTab('map');
+  }
+
+  if (unitCreation.active) {
+    const ok =
+      (unitCreation.mode === 'map' && viewName === 'map') ||
+      (unitCreation.mode === 'proxemic' && viewName === 'proxemic');
+
+    if (!ok) stopUnitCreation();
+  }
+
+  if (viewName === 'map') currentView = 'patterns-map';
+  else if (viewName === 'proxemic') currentView = 'proxemic';
+  else if (viewName === 'gallery') currentView = 'gallery';
+
+  showView(domView);
+
+if (viewName === 'map') {
+  initPatternMapOnce();
+  setTimeout(() => patternMap?.invalidateSize?.(), 0);
+
+  renderPatternBaseGrey();
+
+  if (currentPatternMode === 'patterns') {
+    hideAgencementLayers();
+    refreshPatternsMap();
+  } else if (currentPatternMode === 'agencements') {
+    hidePatternLayers();
+    refreshAgencementSelectionMap();
+    renderSavedAgencementsOnMap();
+  }
+}
+
+if (viewName === 'proxemic') {
+  showProxemicView();
+} else if (viewName === 'gallery') {
+  if (currentPatternMode === 'patterns') {
+    showGalleryView();
+  } else {
+    const gallery = document.getElementById('gallery-view');
+    if (gallery) gallery.innerHTML = "<div style='padding:24px;font-family:Consolas,monospace;'>Vide pour l’instant.</div>";
+  }
+}
+  updateInterfaceElements(currentView);
+}
+
+function setUnitSubTab(name) {
+  currentUnitSub = name;
+
+  const subBtns = document.querySelectorAll('.sub-tab-unit');
+  subBtns.forEach(b => b.classList.toggle('active', b.dataset.unitSub === name));
+
+  const elMap = document.getElementById('unit-map');
+  const elProx = document.getElementById('unit-proxemic');
+
+  if (!elMap || !elProx) return;
+
+  elMap.style.display = (name === 'map') ? 'block' : 'none';
+  elProx.style.display = (name === 'proxemic') ? 'block' : 'none';
+
+  if (name === 'map') {
+    ensureUnitMap();
+    setTimeout(() => unitMap?.invalidateSize?.(), 0);
+    // si on a un contexte, on le (re)rend
+    if (unitContext) renderUnitPatternContextOnUnitMap(unitContext.patternKey, unitContext.sourceFragmentId);
+  } else {
+    if (unitContext) renderUnitProxemicPattern(unitContext.patternKey, unitContext.sourceFragmentId);
+  }
+}
+
+/* ==================================================
+ 17.5 Sous-navigation unité — IIFE
+================================================== */
+
+(function initUnitSubnavOnce(){
+  const subnavUnit = document.getElementById('subnav-unit');
+  if (!subnavUnit) return;
+
+  subnavUnit.querySelectorAll('.sub-tab-unit').forEach(btn => {
+    btn.addEventListener('click', () => setUnitSubTab(btn.dataset.unitSub));
+  });
+})();
+
+/* ==================================================
+ 17.6 Initialisation visuelle immédiate
+================================================== */
+
+// État initial
+setTopTab('fragments');
+setFragmentSubTab('map');
+restyleBuildingsOnFragmentsMap();
+
+/* ==================================================
+ 18) RAFRAÎCHISSEMENTS GLOBAUX ET UTILITAIRES UI
+================================================== */
+
+
+function refreshAgencementDisplays() {
+  hydratedSavedAgencementsCache = null;
+  hydratedSavedAgencementsCacheKey = '';
+  lastPatternComputeKey = '';
+
+  const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
+  recomputeAgencementPatterns({
+    fragments: visibleFragments,
+    buildings: visibleBuildings
+  });
+
+  if (currentView === 'patterns-map') {
+    renderPatternBaseGrey();
+
+    if (currentPatternMode === 'patterns') {
+      refreshPatternsMap();
+    } else if (currentPatternMode === 'agencements') {
+      refreshAgencementSelectionMap();
+      renderSavedAgencementsOnMap();
+    }
+  } else if (currentView === 'proxemic') {
+    if (currentPatternMode === 'patterns') showProxemicView();
+    else showAgencementSelectionProxemicView();
+  } else if (currentView === 'gallery') {
+    showGalleryView();
+  }
+
+  const allFrags = [...(dataGeojson || []), ...(datamGeojson || [])]
+    .filter(f => !f.properties?.isDiscourse && !f.properties?.isBuilding);
+
+  const byFragId = new Map(
+    allFrags.map(f => [String(f.properties?.id || '').trim(), f])
+  );
+
+  const allBlds = [...(batimentsMontreuilGeojson || []), ...(batimentsToulouseGeojson || [])];
+  const byBldId = new Map(
+    allBlds.map(b => [String(b.properties?.id || '').trim(), b])
+  );
+
+  Tabbed.openTabs.forEach((rec, tabId) => {
+    if (rec.kind === 'agencement') {
+      const agId = tabId.replace(/^ag-/, '');
+      const ag = agencementsById.get(agId);
+      if (!ag) return;
+
+      renderAgencementPanel(rec.panel, ag, { byFragId, byBldId });
+      rec.btn.firstChild.nodeValue = ag.name || ag.id;
+    }
+
+    if (rec.kind === 'pattern') {
+      const pKey = tabId.replace(/^pattern-/, '');
+      renderPatternPanel(rec.panel, pKey, patterns[pKey] || {});
+    }
+
+    if (rec.kind === 'saved-agencement') {
+      const uid = tabId.replace(/^saved-ag-/, '');
+      const saved = loadSavedAgencements().find(x => x.uid === uid);
+      if (!saved) return;
+
+      renderSavedAgencementPanel(rec.panel, saved);
+      rec.btn.firstChild.nodeValue = saved.name || saved.id;
+    }
+
+    if (rec.kind === 'saved-agencements-list') {
+      openSavedAgencementsListInPanel(rec.panel);
+    }
+  });
+
+  if (currentView === 'comparison') {
+  renderComparisonView();
+}
+}
+
 
 function updateFragmentTimeButtonsUI() {
   document.querySelectorAll('.fragment-time-btn[data-fragment-time]').forEach(btn => {
@@ -10025,7 +9506,183 @@ function setFragmentTimeMode(mode) {
   }
 }
 
+function refreshProxemicPreserveTransform() {
+  if (currentView !== "proxemic") return;
 
+  const svg = d3.select("#proxemic-view svg");
+  const world = svg.empty() ? null : svg.select("g");
+  const oldTransform = world ? world.attr("transform") : null;
+
+  showProxemicView();
+
+  if (oldTransform) {
+    const newSvg = d3.select("#proxemic-view svg");
+    const newWorld = newSvg.select("g");
+    if (!newWorld.empty()) newWorld.attr("transform", oldTransform);
+  }
+}
+
+const diffToggleBtn = document.getElementById("toggle-diffractions-btn");
+
+function syncDiffToggleUI() {
+  if (!diffToggleBtn) return;
+  diffToggleBtn.textContent = SHOW_DIFFRACTIONS ? "Masquer les diffractions" : "Afficher les diffractions";
+}
+
+/* ==================================================
+ 19) BINDINGS FINAUX ET ÉVÉNEMENTS
+================================================== */
+
+/* ==================================================
+ 19.1 DOMContentLoaded + clavier
+================================================== */
+
+document.addEventListener('DOMContentLoaded', () => {
+  const infoBtn = document.getElementById('info-btn');
+  const aboutBox = document.getElementById('about');
+
+  function toggleAbout() {
+    const isOpen = aboutBox.style.display === 'block';
+    aboutBox.style.display = isOpen ? 'none' : 'block';
+    if (infoBtn) {
+      infoBtn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+    }
+  }
+
+  if (infoBtn) {
+    infoBtn.addEventListener('click', toggleAbout);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && aboutBox.style.display === 'block') {
+      toggleAbout();
+    }
+  });
+
+  document.querySelectorAll('.filter-zone').forEach(cb => {
+    cb.checked = true;
+  });
+
+  document.querySelectorAll('.crit-key').forEach(cb => {
+    cb.checked = true;
+  });
+
+  ACTIVE_CRITERIA_KEYS = new Set(ALL_CRITERIA_KEYS);
+  ACTIVE_CRITERIA_CACHE_KEY = Array.from(ACTIVE_CRITERIA_KEYS).sort().join('|');
+lastPatternComputeKey = '';
+  applyFilters();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && agencementCreation.active) {
+    stopAgencementCreation();
+  }
+});
+
+/* ==================================================
+ 19.2 Listeners de navigation
+================================================== */
+
+topTabs.forEach(btn => btn.addEventListener('click', () => setTopTab(btn.dataset.top)));
+patternModeTabs.forEach(btn => {
+  btn.addEventListener('click', () => setPatternModeTab(btn.dataset.patternMode));
+});
+
+patternViewTabs.forEach(btn => {
+  btn.addEventListener('click', () => setPatternViewTab(btn.dataset.patternView));
+});
+fragmentSubTabs.forEach(btn => {
+  btn.addEventListener('click', () => setFragmentSubTab(btn.dataset.fragmentSub));
+});
+
+/* ==================================================
+ 19.3 Sliders
+================================================== */
+
+const sliderEl = document.getElementById('similarity-slider');
+const sliderValueEl = document.getElementById('slider-value');
+
+if (sliderEl && sliderValueEl) {
+  const initial = parseInt(sliderEl.value, 10) / 100;
+  AG_SIM_THRESHOLD = initial;
+  sliderValueEl.textContent = initial.toFixed(2);
+
+  sliderEl.addEventListener('input', e => {
+    const v = parseInt(e.target.value, 10);
+    AG_SIM_THRESHOLD = v / 100;
+    sliderValueEl.textContent = AG_SIM_THRESHOLD.toFixed(2);
+  });
+
+sliderEl.addEventListener('change', () => {
+  if (currentPatternMode !== 'patterns') return;
+
+  const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
+  recomputeAgencementPatterns({ fragments: visibleFragments, buildings: visibleBuildings });
+
+  if (currentView === 'patterns-map') {
+    refreshPatternsMap();
+  } else if (currentView === 'proxemic') {
+    showProxemicView();
+  } else if (currentView === 'gallery') {
+    showGalleryView();
+  }
+});
+}
+
+/*périmètre*/
+const perimeterEl = document.getElementById('perimeter-slider');
+const perimeterValueEl = document.getElementById('perimeter-value');
+
+if (perimeterEl && perimeterValueEl) {
+  PERIMETER_DIAMETER_M = parseInt(perimeterEl.value, 10) || PERIMETER_DIAMETER_M;
+  perimeterValueEl.textContent = String(PERIMETER_DIAMETER_M);
+
+  perimeterEl.addEventListener('input', e => {
+    const v = parseInt(e.target.value, 10);
+    if (!Number.isFinite(v)) return;
+
+    PERIMETER_DIAMETER_M = v;
+    perimeterValueEl.textContent = String(PERIMETER_DIAMETER_M);
+  });
+
+perimeterEl.addEventListener('change', () => {
+  lastPatternComputeKey = '';
+
+  const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
+  recomputeAgencementPatterns({ fragments: visibleFragments, buildings: visibleBuildings });
+
+  if (currentView === 'patterns-map') {
+    renderPatternBaseGrey();
+    if (currentPatternMode === 'patterns') {
+      refreshPatternsMap();
+    } else if (currentPatternMode === 'agencements') {
+      refreshAgencementSelectionMap();
+      renderSavedAgencementsOnMap();
+    }
+  } else if (currentView === 'proxemic') {
+    showProxemicView();
+  } else if (currentView === 'gallery') {
+    showGalleryView();
+  }
+});
+}
+
+/* ==================================================
+19.4 Diffractions
+================================================== */
+
+if (diffToggleBtn) {
+  diffToggleBtn.addEventListener("click", () => {
+    SHOW_DIFFRACTIONS = !SHOW_DIFFRACTIONS;
+    syncDiffToggleUI();
+    refreshProxemicPreserveTransform(); // tu l’as déjà
+  });
+}
+syncDiffToggleUI();
+
+/* ==================================================
+19.5 Contrôles de temps
+================================================== */
 
 document.querySelectorAll('.fragment-time-btn[data-fragment-time]').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -10033,7 +9690,22 @@ document.querySelectorAll('.fragment-time-btn[data-fragment-time]').forEach(btn 
   });
 });
 
+document.querySelectorAll('.pattern-gallery-time-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    currentPatternGalleryTimeMode = btn.dataset.patternGalleryTime;
+    updateInterfaceElements(currentView);
 
+    if (currentView === 'gallery') {
+      showGalleryView();
+    } else if (currentView === 'comparison') {
+      renderComparisonView();
+    }
+  });
+});
+
+/* ==================================================
+19.6 Légende, critères, filtres
+================================================== */
 
 document.getElementById('toggle-legend-btn').addEventListener('click', () => {
   const legend = document.getElementById('criteria-legend');
@@ -10087,6 +9759,9 @@ document.querySelectorAll('.filter-zone').forEach(cb => {
   });
 });
 
+/* ==================================================
+19.7 Boutons agencements / patterns sauvegardés
+================================================== */
 
 const savedListBtn = document.getElementById('saved-patterns-list-btn');
 if (savedListBtn) savedListBtn.addEventListener('click', () => openSavedPatternsListModal());
@@ -10125,22 +9800,13 @@ if (savedAgencementsListBtn) {
   });
 }
 
+/* ==================================================
+19.8 Checkbox discours
+================================================== */
+
 const toggleDiscoursesCheckbox = document.getElementById('toggle-discourses');
 if (toggleDiscoursesCheckbox) {
   toggleDiscoursesCheckbox.addEventListener('change', () => {
     applyFilters();
   });
 }
-
-document.querySelectorAll('.pattern-gallery-time-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    currentPatternGalleryTimeMode = btn.dataset.patternGalleryTime;
-    updateInterfaceElements(currentView);
-
-    if (currentView === 'gallery') {
-      showGalleryView();
-    } else if (currentView === 'comparison') {
-      renderComparisonView();
-    }
-  });
-});
