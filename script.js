@@ -29,16 +29,14 @@ const toulouseZoom = 15;
 ================================================== */
 
 let PERIMETER_DIAMETER_M = 100;
-let AG_SIM_THRESHOLD = 0.60;
+let AG_SIM_THRESHOLD = 0.55;
 
 let MIN_AG_FRAGMENTS = 2;
 let ALLOW_SINGLE_FRAGMENT_WITH_BUILDINGS = true;
 let MIN_BUILDINGS_FOR_SINGLE_FRAGMENT = 1;
 let MAX_AG_OVERLAP = 0.05;
 let MIN_PATTERN_OCCURRENCES = 2;
-let RARE_MOTIF_BOOST = 0.35;
-let SHARED_NULL_WEIGHT = 1;
-let COUNT_SHARED_NULL_IN_NUMERIC_SIM = true;
+
 
 
 /* ==================================================
@@ -348,7 +346,8 @@ let REJECT_EXACT_SAME_FRAGMENT_SET = true;
 let MAX_FRAGMENT_OVERLAP_WITH_SEED = 0.5;
 
 
-
+let MAX_OCCURRENCE_OVERLAP_BETWEEN_CANDIDATES = 0.75;
+let MIN_DISTINCT_OCCURRENCE_SIMILARITY = 0.88;
 
 /* ==================================================
    RÉFÉRENCES DOM FRÉQUENTES
@@ -510,13 +509,7 @@ function parseFuzzy(v) {
   return Number.isFinite(num) ? num : null;
 }
 
-function isSharedNull(a, b) {
-  return a === null && b === null;
-}
 
-function isNonNull(v) {
-  return v !== null && v !== undefined;
-}
 
 function featureToVector(feature) {
   if (!feature) return [];
@@ -759,27 +752,6 @@ function featureWithinRadius(feature, centerLatLng, radiusM) {
   const ll = getFeatureCenterLatLng(feature);
   if (!ll) return false;
   return distanceMeters(ll, centerLatLng) <= radiusM;
-}
-
-function getFeatureCenter(feature) {
-  if (feature.geometry?.type === 'Point') {
-    const c = feature.geometry.coordinates;
-    return L.latLng(c[1], c[0]);
-  }
-
-  const tmp = L.geoJSON(feature);
-
-  try {
-    return tmp.getBounds().getCenter();
-  } catch (e) {
-    const c = (
-      feature.geometry &&
-      feature.geometry.coordinates &&
-      feature.geometry.coordinates[0]
-    ) || [0, 0];
-
-    return L.latLng(c[1] || 0, c[0] || 0);
-  }
 }
 
 
@@ -1250,53 +1222,7 @@ function computeTemporalFragmentPairScore(profileA, profileB) {
   return Math.max(TEMPORAL_MIN_MATCH_SCORE, score);
 }
 
-function computeBestTemporalMatchScore(profileA, profilesB, usedIds = new Set()) {
-  let bestScore = -1;
-  let bestIdx = -1;
 
-  profilesB.forEach((profileB, idx) => {
-    if (usedIds.has(idx)) return;
-
-    const s = computeTemporalFragmentPairScore(profileA, profileB);
-    if (s > bestScore) {
-      bestScore = s;
-      bestIdx = idx;
-    }
-  });
-
-  return { bestScore, bestIdx };
-}
-
-function similarityTemporalAgencements(agA, agB) {
-  const profilesA = agA?.temporalProfiles || [];
-  const profilesB = agB?.temporalProfiles || [];
-
-  if (!profilesA.length || !profilesB.length) return 0;
-
-  // on apparie toujours la plus petite liste vers la plus grande
-  const small = profilesA.length <= profilesB.length ? profilesA : profilesB;
-  const large = profilesA.length <= profilesB.length ? profilesB : profilesA;
-
-  const used = new Set();
-  let sum = 0;
-  let count = 0;
-
-  small.forEach(profileA => {
-    const { bestScore, bestIdx } = computeBestTemporalMatchScore(profileA, large, used);
-    if (bestIdx >= 0) {
-      used.add(bestIdx);
-      sum += bestScore;
-      count++;
-    }
-  });
-
-  if (!count) return 0;
-
-  // pénalité légère si les tailles diffèrent beaucoup
-  const sizePenalty = Math.min(small.length, large.length) / Math.max(small.length, large.length);
-
-  return (sum / count) * sizePenalty;
-}
 
 function getPatternBaseFeaturesForCurrentTimeMode() {
   const activeZones = getActiveZones ? getActiveZones() : ['montreuil', 'mirail'];
@@ -1683,25 +1609,8 @@ function average(nums) {
   return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
 
-function stdev(nums) {
-  const vals = (nums || []).filter(v => Number.isFinite(v));
-  if (vals.length < 2) return 0;
 
-  const m = average(vals);
-  const v = vals.reduce((acc, x) => acc + Math.pow(x - m, 2), 0) / vals.length;
 
-  return Math.sqrt(v);
-}
-
-function normalizedValue(v) {
-  const n = parseFuzzy(v);
-  if (n === null) return null;
-  return Math.max(0, Math.min(1, n));
-}
-
-function addCount(map, key, inc = 1) {
-  map[key] = (map[key] || 0) + inc;
-}
 
 function overlapRatioByIds(idsA, idsB) {
   const A = new Set(idsA || []);
@@ -1716,12 +1625,6 @@ function overlapRatioByIds(idsA, idsB) {
   return inter / Math.min(A.size, B.size);
 }
 
-function topEntries(obj, topN = 8) {
-  return Object.entries(obj || {})
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, topN)
-    .map(([label, count]) => ({ label, count }));
-}
 
 function getActiveCriteriaKeysArray() {
   return Array.from(ACTIVE_CRITERIA_KEYS || []);
@@ -1748,224 +1651,185 @@ function getCurrentPatternParams() {
 }
 
 
-function computeAgencementRelationalSignature(fragments = [], buildings = [], radiusM = 1) {
-  const safeRadius = Math.max(1, Number(radiusM) || 1);
+function averageActiveFuzzyForFeature(feature, keys = []) {
+  const vals = (keys || [])
+    .filter(k => ACTIVE_CRITERIA_KEYS.has(k))
+    .map(k => parseFuzzy(feature?.properties?.[k]))
+    .filter(v => v !== null && Number.isFinite(v));
 
-  const numericMeans = {};
-  const numericSpread = {};
-  const textTokens = {};
-  const dominantPoleShares = { PA: 0, DH: 0, FS: 0 };
+  return vals.length ? average(vals) : null;
+}
 
+function getFragmentDominantPole(feature) {
+  const scores = {
+    PA: averageActiveFuzzyForFeature(feature, FUZZY_GROUPS.PA || []),
+    DH: averageActiveFuzzyForFeature(feature, FUZZY_GROUPS.DH || []),
+    FS: averageActiveFuzzyForFeature(feature, FUZZY_GROUPS.FS || [])
+  };
+
+  const ranked = Object.entries(scores)
+    .filter(([, v]) => v !== null)
+    .sort((a, b) => b[1] - a[1]);
+
+  if (!ranked.length) {
+    return { pole: 'OTHER', score: 0 };
+  }
+
+  return {
+    pole: ranked[0][0],
+    score: ranked[0][1]
+  };
+}
+
+function buildAgencementFragmentSequence(fragments = [], center = null) {
+  const poleRank = { PA: 0, DH: 1, FS: 2, OTHER: 3 };
+  const c = center || latLngAverage(
+    (fragments || []).map(getFeatureCenterLatLng).filter(Boolean)
+  );
+
+  return (fragments || [])
+    .filter(Boolean)
+    .map(f => {
+      const ll = getFeatureCenterLatLng(f);
+      const poleInfo = getFragmentDominantPole(f);
+
+      return {
+        id: cleanFragmentId(f?.properties?.id),
+        feature: f,
+        vec: featureToVector(f),
+        temporal: computeFragmentTemporalProfile(f),
+        pole: poleInfo.pole,
+        poleScore: poleInfo.score ?? 0,
+        distToCenter: (ll && c) ? distanceMeters(ll, c) : Infinity
+      };
+    })
+    .sort((a, b) => {
+      const poleDiff = (poleRank[a.pole] ?? 99) - (poleRank[b.pole] ?? 99);
+      if (poleDiff !== 0) return poleDiff;
+
+      if (b.poleScore !== a.poleScore) {
+        return b.poleScore - a.poleScore;
+      }
+
+      if (a.distToCenter !== b.distToCenter) {
+        return a.distToCenter - b.distToCenter;
+      }
+
+      return String(a.id || '').localeCompare(
+        String(b.id || ''),
+        undefined,
+        { numeric: true }
+      );
+    });
+}
+
+function computeSequentialFragmentPairScore(itemA, itemB, idxA, idxB, lenA, lenB) {
+  if (!itemA || !itemB) return 0;
+
+  const sFrag = similarityFuzzy(itemA.vec || [], itemB.vec || []);
+  const sTemporal = computeTemporalFragmentPairScore(
+    itemA.temporal,
+    itemB.temporal
+  );
+
+  const posA = lenA <= 1 ? 0 : idxA / (lenA - 1);
+  const posB = lenB <= 1 ? 0 : idxB / (lenB - 1);
+
+  // bonus léger d’ordre : on reste permissif
+  const sOrder = Math.max(0, 1 - Math.abs(posA - posB) * 1.25);
+
+  return (sFrag * 0.75) + (sTemporal * 0.15) + (sOrder * 0.10);
+}
+
+function similarityFragmentSequences(seqA = [], seqB = []) {
+  if (!seqA.length || !seqB.length) return 0;
+
+  const small = seqA.length <= seqB.length ? seqA : seqB;
+  const large = seqA.length <= seqB.length ? seqB : seqA;
+
+  const used = new Set();
+  let sum = 0;
+  let count = 0;
+
+  small.forEach((itemA, idxA) => {
+    let bestScore = -1;
+    let bestIdx = -1;
+
+    large.forEach((itemB, idxB) => {
+      if (used.has(idxB)) return;
+
+      const s = computeSequentialFragmentPairScore(
+        itemA,
+        itemB,
+        idxA,
+        idxB,
+        small.length,
+        large.length
+      );
+
+      if (s > bestScore) {
+        bestScore = s;
+        bestIdx = idxB;
+      }
+    });
+
+    if (bestIdx >= 0) {
+      used.add(bestIdx);
+      sum += bestScore;
+      count++;
+    }
+  });
+
+  if (!count) return 0;
+
+  // pénalité légère seulement si tailles vraiment différentes
+  const coverage = small.length / Math.max(large.length, 1);
+
+  return (sum / count) * (0.85 + 0.15 * coverage);
+}
+
+function similarityBuildingProfiles(profileA, profileB) {
+  const fonctionsA = [...(profileA?.fonctions || new Set())];
+  const fonctionsB = [...(profileB?.fonctions || new Set())];
+  const etatsA = [...(profileA?.etats || new Set())];
+  const etatsB = [...(profileB?.etats || new Set())];
+
+  const hasAnyInfo =
+    fonctionsA.length || fonctionsB.length || etatsA.length || etatsB.length;
+
+  if (!hasAnyInfo) return 0.5;
+
+  const sFonctions =
+    (fonctionsA.length || fonctionsB.length)
+      ? jaccardSimilarity(fonctionsA, fonctionsB)
+      : 0.5;
+
+  const sEtats =
+    (etatsA.length || etatsB.length)
+      ? jaccardSimilarity(etatsA, etatsB)
+      : 0.5;
+
+  return (sFonctions + sEtats) / 2;
+}
+
+
+
+function computeAgencementRelationalSignature(fragments = [], buildings = []) {
   const fragList = (fragments || []).filter(Boolean);
   const bldList = (buildings || []).filter(Boolean);
 
-  // -----------------------------
-  // 1) Moyennes et dispersions fuzzy
-  // -----------------------------
-  ALL_FUZZY_KEYS.forEach(k => {
-    if (!ACTIVE_CRITERIA_KEYS.has(k)) {
-      numericMeans[k] = null;
-      numericSpread[k] = null;
-      return;
-    }
+  const center = latLngAverage([
+    ...fragList.map(getFeatureCenterLatLng),
+    ...bldList.map(getFeatureCenterLatLng)
+  ].filter(Boolean));
 
-    const vals = fragList
-      .map(f => parseFuzzy(f?.properties?.[k]))
-      .filter(v => v !== null && Number.isFinite(v));
-
-    numericMeans[k] = vals.length ? average(vals) : null;
-    numericSpread[k] = vals.length ? stdev(vals) : null;
-  });
-
-  // -----------------------------
-  // 2) Tokens textuels dominants
-  // -----------------------------
-  TEXT_KEYS.forEach(k => {
-    if (!ACTIVE_CRITERIA_KEYS.has(k)) {
-      textTokens[k] = [];
-      return;
-    }
-
-    const counts = {};
-
-    fragList.forEach(f => {
-      const toks = parseMultiText(f?.properties?.[k]) || [];
-      toks.forEach(tok => addCount(counts, tok, 1));
-    });
-
-    textTokens[k] = topEntries(counts, 12).map(x => x.label);
-  });
-
-  // -----------------------------
-  // 3) Pôle dominant par fragment
-  // -----------------------------
-  function scoreGroup(feature, keys) {
-    const vals = keys
-      .filter(k => ACTIVE_CRITERIA_KEYS.has(k))
-      .map(k => parseFuzzy(feature?.properties?.[k]))
-      .filter(v => v !== null && Number.isFinite(v));
-
-    return vals.length ? average(vals) : null;
-  }
-
-  let poleCount = 0;
-
-  fragList.forEach(f => {
-    const pa = scoreGroup(f, FUZZY_GROUPS.PA || []);
-    const dh = scoreGroup(f, FUZZY_GROUPS.DH || []);
-    const fs = scoreGroup(f, FUZZY_GROUPS.FS || []);
-
-    const entries = [
-      ['PA', pa],
-      ['DH', dh],
-      ['FS', fs]
-    ].filter(([, v]) => v !== null);
-
-    if (!entries.length) return;
-
-    entries.sort((a, b) => b[1] - a[1]);
-    dominantPoleShares[entries[0][0]] += 1;
-    poleCount++;
-  });
-
-  if (poleCount > 0) {
-    dominantPoleShares.PA /= poleCount;
-    dominantPoleShares.DH /= poleCount;
-    dominantPoleShares.FS /= poleCount;
-  }
-
-  // -----------------------------
-  // 4) Contraste interne entre fragments
-  // -----------------------------
-  let contrastSum = 0;
-  let contrastCount = 0;
-
-  for (let i = 0; i < fragList.length; i++) {
-    for (let j = i + 1; j < fragList.length; j++) {
-      const va = featureToVector(fragList[i]);
-      const vb = featureToVector(fragList[j]);
-      const sim = similarityFuzzy(va, vb);
-      const contrast = 1 - sim;
-
-      if (Number.isFinite(contrast)) {
-        contrastSum += contrast;
-        contrastCount++;
-      }
-    }
-  }
-
-  const internalContrast = contrastCount ? (contrastSum / contrastCount) : 0;
-
-  // -----------------------------
-  // 5) Distances spatiales entre fragments
-  // -----------------------------
-  let pairDistSum = 0;
-  let pairDistCount = 0;
-  let localDegreeSum = 0;
-
-  const centers = fragList
-    .map(f => ({ f, ll: getFeatureCenterLatLng(f) }))
-    .filter(x => x.ll);
-
-  for (let i = 0; i < centers.length; i++) {
-    let localDeg = 0;
-
-    for (let j = 0; j < centers.length; j++) {
-      if (i === j) continue;
-
-      const d = distanceMeters(centers[i].ll, centers[j].ll);
-      if (!Number.isFinite(d)) continue;
-
-      if (j > i) {
-        pairDistSum += d;
-        pairDistCount++;
-      }
-
-      if (d <= safeRadius) localDeg++;
-    }
-
-    localDegreeSum += localDeg;
-  }
-
-  const avgPairDistance = pairDistCount ? (pairDistSum / pairDistCount) : null;
-  const avgLocalDegree = centers.length ? (localDegreeSum / centers.length) : null;
-
-  // densité relationnelle simple
-  let density = 0;
-  if (centers.length >= 2) {
-    const maxPairs = (centers.length * (centers.length - 1)) / 2;
-    let nearPairs = 0;
-
-    for (let i = 0; i < centers.length; i++) {
-      for (let j = i + 1; j < centers.length; j++) {
-        const d = distanceMeters(centers[i].ll, centers[j].ll);
-        if (Number.isFinite(d) && d <= safeRadius) nearPairs++;
-      }
-    }
-
-    density = maxPairs ? (nearPairs / maxPairs) : 0;
-  }
-
-  // -----------------------------
-  // 6) Contexte bâti proche
-  // -----------------------------
-  const stateCounts = {};
-  const functionCounts = {};
-  const nearbyDistances = [];
-  let noNearbyCount = 0;
-
-  fragList.forEach(f => {
-    const c = getFeatureCenterLatLng(f);
-    if (!c) {
-      noNearbyCount++;
-      return;
-    }
-
-    let nearest = Infinity;
-    let found = false;
-
-    bldList.forEach(b => {
-      const bc = getFeatureCenterLatLng(b);
-      if (!bc) return;
-
-      const d = distanceMeters(c, bc);
-      if (!Number.isFinite(d)) return;
-
-      if (d <= safeRadius) {
-        found = true;
-        if (d < nearest) nearest = d;
-
-        addCount(stateCounts, getPropEtat(b.properties || {}), 1);
-        addCount(functionCounts, getPropFonction(b.properties || {}), 1);
-      }
-    });
-
-    if (found) {
-      nearbyDistances.push(nearest);
-    } else {
-      noNearbyCount++;
-    }
-  });
-
-  const buildingContextStats = {
-    totalFragments: fragList.length,
-    nearbyBuildingsCount: bldList.length,
-    noNearbyCount,
-    avgDistance: nearbyDistances.length ? average(nearbyDistances) : null,
-    topStates: topEntries(stateCounts, 6),
-    topFunctions: topEntries(functionCounts, 6)
-  };
+  const fragmentSequence = buildAgencementFragmentSequence(fragList, center);
+  const buildingProfile = extractBuildingProfile(bldList);
 
   return {
-    numericMeans,
-    numericSpread,
-    textTokens,
-    dominantPoleShares,
-    internalContrast,
-    density,
-    avgPairDistance,
-    avgLocalDegree,
-    buildingContextStats
+    center,
+    fragmentSequence,
+    buildingProfile
   };
 }
 
@@ -1975,56 +1839,29 @@ function similarityAgencements(agA, agB) {
   const sigA = agA.fragmentsAgg || {};
   const sigB = agB.fragmentsAgg || {};
 
-  let sum = 0;
-  let weight = 0;
+  const seqA = sigA.fragmentSequence || [];
+  const seqB = sigB.fragmentSequence || [];
 
-  // 1) Similarité fuzzy sur les moyennes des fragments
-  let fuzzySum = 0;
-  let fuzzyCount = 0;
+  if (!seqA.length || !seqB.length) return 0;
 
-  ALL_FUZZY_KEYS.forEach(k => {
-    if (!ACTIVE_CRITERIA_KEYS.has(k)) return;
+  const sSeq = similarityFragmentSequences(seqA, seqB);
 
-    const a = sigA.numericMeans?.[k];
-    const b = sigB.numericMeans?.[k];
+  const sBuildings = similarityBuildingProfiles(
+    sigA.buildingProfile,
+    sigB.buildingProfile
+  );
 
-    if (a === null || a === undefined || b === null || b === undefined) return;
+  const countA = Number(agA?.fragmentsCount || 0);
+  const countB = Number(agB?.fragmentsCount || 0);
 
-    fuzzySum += (1 - Math.abs(a - b));
-    fuzzyCount++;
-  });
+  const sSize =
+    (countA > 0 && countB > 0)
+      ? Math.min(countA, countB) / Math.max(countA, countB)
+      : 0;
 
-  const sNum = fuzzyCount ? (fuzzySum / fuzzyCount) : 0;
-  sum += sNum * 0.55;
-  weight += 0.55;
-
-  // 2) Similarité textuelle sur usages / acteurs / initiateurs / éléments spatiaux
-  let textSum = 0;
-  let textCount = 0;
-
-  TEXT_KEYS.forEach(k => {
-    if (!ACTIVE_CRITERIA_KEYS.has(k)) return;
-
-    const a = sigA.textTokens?.[k] || [];
-    const b = sigB.textTokens?.[k] || [];
-
-    if (!a.length && !b.length) return;
-
-    textSum += jaccardSimilarity(a, b);
-    textCount++;
-  });
-
-  const sText = textCount ? (textSum / textCount) : 0;
-  sum += sText * 0.30;
-  weight += 0.30;
-
-  // 3) Similarité temporelle
-  const sTemporal = similarityTemporalAgencements(agA, agB);
-  sum += sTemporal * 0.15;
-  weight += 0.15;
-
-  if (!weight) return 0;
-  return sum / weight;
+  // La séquence porte presque tout.
+  // Le bâti et la taille restent des bonus légers.
+  return (sSeq * 0.82) + (sBuildings * 0.10) + (sSize * 0.08);
 }
 
 
@@ -2600,7 +2437,6 @@ function hydrateSavedAgencement(rec) {
     radiusM,
 
     fragmentsAgg: relational,
-    buildingsAgg: relational.buildingContextStats,
     temporalProfiles: buildTemporalProfilesForAgencement(fragments),
 
     patternIds: []
@@ -2834,17 +2670,64 @@ function buildOccurrencesForSeed(
       candidate.buildings,
       radiusM
     );
-    candidate.buildingsAgg = candidate.fragmentsAgg.buildingContextStats;
     candidate.temporalProfiles = buildTemporalProfilesForAgencement(candidate.fragments);
     candidate.contourLatLngs = buildAgencementBoundsLatLngs({
       fragments: candidate.fragments,
       buildings: candidate.buildings
     });
 
-    const sim = similarityAgencements(seed, candidate);
+        const sim = similarityAgencements(seed, candidate);
     if (sim < AG_SIM_THRESHOLD) return;
 
-    occurrences.push(candidate);
+    // filtre anti quasi-doublons parmi les occurrences déjà retenues
+    let shouldSkip = false;
+    let replaceIndex = -1;
+
+    for (let i = 1; i < occurrences.length; i++) {
+      const kept = occurrences[i];
+      if (!kept) continue;
+
+      const fragOverlap = overlapRatioByIds(
+        candidate.fragmentIds || [],
+        kept.fragmentIds || []
+      );
+
+      const bldOverlap = overlapRatioByIds(
+        candidate.buildingIds || [],
+        kept.buildingIds || []
+      );
+
+      const occSim = similarityAgencements(candidate, kept);
+
+      const almostSame =
+        fragOverlap >= MAX_OCCURRENCE_OVERLAP_BETWEEN_CANDIDATES &&
+        occSim >= MIN_DISTINCT_OCCURRENCE_SIMILARITY;
+
+      const sameBuiltContext =
+        bldOverlap >= 0.66 &&
+        occSim >= MIN_DISTINCT_OCCURRENCE_SIMILARITY;
+
+      if (almostSame || sameBuiltContext) {
+        const keptScore = similarityAgencements(seed, kept);
+        const candScore = sim;
+
+        // on garde le meilleur des deux
+        if (candScore > keptScore) {
+          replaceIndex = i;
+        } else {
+          shouldSkip = true;
+        }
+        break;
+      }
+    }
+
+    if (shouldSkip) return;
+
+    if (replaceIndex >= 0) {
+      occurrences[replaceIndex] = candidate;
+    } else {
+      occurrences.push(candidate);
+    }
   });
 
   const sorted = occurrences.sort(sortAgencementsById);
@@ -2896,18 +2779,30 @@ function rebuildFragmentToPatternIndex() {
 
 function filterSeedAgencementToVisibleMembers(
   ag,
-  visibleFragmentIds = new Set(),
-  visibleBuildingIds = new Set()
+  visibleFragments = [],
+  visibleBuildings = []
 ) {
   if (!ag) return null;
 
-  const fragments = (ag.fragments || []).filter(f =>
-    visibleFragmentIds.has(cleanFragmentId(f?.properties?.id))
+  const visibleFragmentsById = new Map(
+    (visibleFragments || [])
+      .map(f => [cleanFragmentId(f?.properties?.id), f])
+      .filter(([id]) => id)
   );
 
-  const buildings = (ag.buildings || []).filter(b =>
-    visibleBuildingIds.has(cleanFragmentId(b?.properties?.id))
+  const visibleBuildingsById = new Map(
+    (visibleBuildings || [])
+      .map(b => [cleanFragmentId(b?.properties?.id), b])
+      .filter(([id]) => id)
   );
+
+  const fragments = (ag.fragmentIds || [])
+    .map(id => visibleFragmentsById.get(cleanFragmentId(id)))
+    .filter(Boolean);
+
+  const buildings = (ag.buildingIds || [])
+    .map(id => visibleBuildingsById.get(cleanFragmentId(id)))
+    .filter(Boolean);
 
   const fragmentsCount = fragments.length;
   const buildingsCount = buildings.length;
@@ -2942,7 +2837,6 @@ function filterSeedAgencementToVisibleMembers(
       ...buildings.map(getFeatureCenterLatLng)
     ].filter(Boolean)),
     fragmentsAgg: relational,
-    buildingsAgg: relational.buildingContextStats,
     temporalProfiles: buildTemporalProfilesForAgencement(fragments),
     contourLatLngs: buildAgencementBoundsLatLngs({ fragments, buildings })
   };
@@ -2967,15 +2861,16 @@ function recomputeAgencementPatterns({ fragments, buildings } = {}) {
   const zonesKey = ((getActiveZones && getActiveZones()) || []).slice().sort().join('|');
   const savedKey = localStorage.getItem(SAVED_AGENCEMENTS_KEY) || '[]';
 
-  const computeKey = [
-    zonesKey,
-    ACTIVE_CRITERIA_CACHE_KEY,
-    String(AG_SIM_THRESHOLD),
-    String(PERIMETER_DIAMETER_M),
-    savedKey,
-    fragIdsKey,
-    bldIdsKey
-  ].join('§');
+const computeKey = [
+  zonesKey,
+  currentFragmentTimeMode,
+  ACTIVE_CRITERIA_CACHE_KEY,
+  String(AG_SIM_THRESHOLD),
+  String(PERIMETER_DIAMETER_M),
+  savedKey,
+  fragIdsKey,
+  bldIdsKey
+].join('§');
 
   if (computeKey === lastPatternComputeKey) return;
   lastPatternComputeKey = computeKey;
@@ -2988,16 +2883,8 @@ function recomputeAgencementPatterns({ fragments, buildings } = {}) {
     .map(b => ({ feature: b, ll: getFeatureCenterLatLng(b) }))
     .filter(x => x.ll);
 
-  const visibleFragmentIds = new Set(
-  visibleFragments.map(f => cleanFragmentId(f?.properties?.id)).filter(Boolean)
-);
-
-const visibleBuildingIds = new Set(
-  visibleBuildings.map(b => cleanFragmentId(b?.properties?.id)).filter(Boolean)
-);
-
 const seeds = getSelectedAgencementsForPatterns()
-  .map(ag => filterSeedAgencementToVisibleMembers(ag, visibleFragmentIds, visibleBuildingIds))
+  .map(ag => filterSeedAgencementToVisibleMembers(ag, visibleFragments, visibleBuildings))
   .filter(Boolean)
   .filter(ag => agencementTouchesActiveZones(ag));
 
@@ -3043,61 +2930,7 @@ const seeds = getSelectedAgencementsForPatterns()
   rebuildFragmentToPatternIndex();
 }
 
-function computePatternSignatureFromOccurrences(occs) {
-  const fragments = [];
-  const buildings = [];
 
-  (occs || []).forEach(ag => {
-    fragments.push(...(ag?.fragments || []));
-    buildings.push(...(ag?.buildings || []));
-  });
-
-  const radiusM =
-    average(
-      (occs || [])
-        .map(ag => Number(ag?.radiusM))
-        .filter(r => Number.isFinite(r) && r > 0)
-    ) || Math.max(1, PERIMETER_DIAMETER_M / 2);
-
-  return computeAgencementRelationalSignature(fragments, buildings, radiusM);
-}
-
-function computeSimplePatternBuildingContext(occs) {
-  const stateCounts = {};
-  const functionCounts = {};
-
-  let totalFragments = 0;
-  let noNearbyCount = 0;
-  const avgDistances = [];
-
-  (occs || []).forEach(ag => {
-    const ctx = ag?.buildingsAgg || ag?.fragmentsAgg?.buildingContextStats;
-    if (!ctx) return;
-
-    totalFragments += Number(ctx.totalFragments || 0);
-    noNearbyCount += Number(ctx.noNearbyCount || 0);
-
-    if (Number.isFinite(ctx.avgDistance)) {
-      avgDistances.push(Number(ctx.avgDistance));
-    }
-
-    (ctx.topStates || []).forEach(item => {
-      addCount(stateCounts, item.label, Number(item.count || 0));
-    });
-
-    (ctx.topFunctions || []).forEach(item => {
-      addCount(functionCounts, item.label, Number(item.count || 0));
-    });
-  });
-
-  return {
-    totalFragments,
-    noNearbyCount,
-    avgDistance: avgDistances.length ? average(avgDistances) : null,
-    topStates: topEntries(stateCounts, 6),
-    topFunctions: topEntries(functionCounts, 6)
-  };
-}
 
 /*---------------------------------------
   AGENCEMENTS (diffractions internes)
@@ -4083,97 +3916,6 @@ function getPatternFragmentInstances(occs, byFragId) {
   });
 
   return out;
-}
-
-function computePatternPanelSummary(occs, byFragId) {
-  const fragmentInstances = getPatternFragmentInstances(occs, byFragId);
-  const total = fragmentInstances.length;
-
-  const sharedCriteria = [];
-  const nullCriteria = [];
-  const textCounts = {};
-
-  TEXT_KEYS.forEach(k => { textCounts[k] = {}; });
-
-ALL_FUZZY_KEYS.forEach(k => {
-  if (!ACTIVE_CRITERIA_KEYS.has(k)) return;
-
-  let filledCount = 0;
-  let positiveCount = 0;
-  let nullCount = 0;
-  const filledValues = [];
-
-  fragmentInstances.forEach(f => {
-    const v = parseFuzzy(f?.properties?.[k]);
-
-    if (v === null) {
-      nullCount++;
-      return;
-    }
-
-    filledCount++;
-    filledValues.push(v);
-
-    if (v > 0) positiveCount++;
-  });
-
-  const mean = filledValues.length ? average(filledValues) : null;
-
-  // critère partagé avec valeurs réellement renseignées
-  if (filledCount > 0 && mean !== null) {
-    sharedCriteria.push({
-      key: k,
-      mean,
-      positiveCount,
-      filledCount,
-      total
-    });
-  }
-
-  // critère null dans une partie ou dans la totalité des fragments
-  if (nullCount > 0) {
-    nullCriteria.push({
-      key: k,
-      kind: 'null',
-      count: nullCount,
-      total
-    });
-  }
-});
-
-  TEXT_KEYS.forEach(k => {
-    if (!ACTIVE_CRITERIA_KEYS.has(k)) return;
-
-    fragmentInstances.forEach(f => {
-      const arr = parseMultiText(f?.properties?.[k]) || [];
-      arr.forEach(tok => {
-        textCounts[k][tok] = (textCounts[k][tok] || 0) + 1;
-      });
-    });
-  });
-
-  const textCriteria = [];
-  TEXT_KEYS.forEach(k => {
-    Object.entries(textCounts[k]).forEach(([token, count]) => {
-      textCriteria.push({ key: k, token, count, total });
-    });
-  });
-
-  textCriteria.sort((a, b) => b.count - a.count);
-
-  sharedCriteria.sort((a, b) => {
-    if (b.positiveCount !== a.positiveCount) return b.positiveCount - a.positiveCount;
-    return b.mean - a.mean;
-  });
-
-  nullCriteria.sort((a, b) => b.count - a.count);
-
-  return {
-    sharedCriteria: sharedCriteria.slice(0, 10),
-    nullCriteria: nullCriteria.slice(0, 10),
-    textCriteria: textCriteria.slice(0, 10),
-    buildingContext: computeSimplePatternBuildingContext(occs)
-  };
 }
 
 
@@ -5966,27 +5708,21 @@ function featureHasAnyActiveCriterion(feature) {
 }
 
 function getVisibleSpatialFeaturesForPatterns() {
-  const allSpatial = [
-    ...(dataGeojson || []),
-    ...(datamGeojson || []),
+  const fragmentSource = getPatternBaseFeaturesForCurrentTimeMode()
+    .filter(f => !f?.properties?.isDiscourse && !f?.properties?.isBuilding);
+
+  const buildingSource = [
     ...(batimentsMontreuilGeojson || []),
     ...(batimentsToulouseGeojson || [])
-  ].filter(f => {
-    const props = f?.properties || {};
-    if (props.isDiscourse) return false;
-    if (!isFeatureInActiveZones(f)) return false;
-    return true;
-  });
+  ];
 
-  const visibleFragments = allSpatial.filter(f => {
-    const props = f.properties || {};
-    return !props.isBuilding && featureHasAnyActiveCriterion(f);
-  });
+  const visibleFragments = fragmentSource.filter(f =>
+    isFeatureInActiveZones(f) && featureHasAnyActiveCriterion(f)
+  );
 
-  const visibleBuildings = allSpatial.filter(f => {
-    const props = f.properties || {};
-    return !!props.isBuilding;
-  });
+  const visibleBuildings = buildingSource.filter(f =>
+    !!f?.properties?.isBuilding && isFeatureInActiveZones(f)
+  );
 
   return { visibleFragments, visibleBuildings };
 }
@@ -9580,7 +9316,6 @@ function openPatternEditor(options) {
     mode = 'create',
     patternKey = '',
     elements = [],
-    criteria = {},          // ⇐ maintenant on passe des critères fuzzy
     name = patternKey,
     description = '',
     onSave = () => {},
@@ -9641,7 +9376,6 @@ function openPatternEditor(options) {
       name: (nameEl.value || patternKey).trim(),
       description: (descEl.value || '').trim(),
       elements: elements.slice(),
-      criteria: criteria   // ⇐ on renvoie bien les critères fuzzy
     };
     onSave(payload);
     close();
@@ -9650,36 +9384,7 @@ function openPatternEditor(options) {
   modal.style.display = 'block';
 }
 
-/**
- * Calcule des critères "moyens" fuzzy pour une liste d'IDs de fragments.
- * Retourne un objet { cléFuzzy: valeurMoyenne } avec des nombres entre 0 et 1.
- */
-function computeConsensusCriteriaForIds(ids) {
-  const all = [...(dataGeojson || []), ...(datamGeojson || [])];
-  const byId = new Map(all.map(f => [f.properties.id, f]));
 
-  const consensus = {};
-
-  ALL_FUZZY_KEYS.forEach((key, idx) => {
-    let sum = 0;
-    let count = 0;
-
-    ids.forEach(id => {
-      const f = byId.get(id);
-      if (!f) return;
-      const v = parseFuzzy(f.properties[key]);
-      if (v === null || Number.isNaN(v)) return;
-      sum += v;
-      count++;
-    });
-
-    if (count > 0) {
-      consensus[key] = sum / count;  // moyenne fuzzy
-    }
-  });
-
-  return consensus;
-}
 
 function computeTextConsensusForIds(ids, key, byIdFeatureMap, { minRatio = 1 } = {}) {
   // minRatio=1 => strictement commun à TOUS les fragments du pattern
@@ -9710,40 +9415,120 @@ function computeTextConsensusForIds(ids, key, byIdFeatureMap, { minRatio = 1 } =
     .map(([tok]) => tok);
 }
 
+function buildSavedPatternOccurrenceSnapshot(ag, patternKey = '') {
+  if (!ag) return null;
+
+  const contourLatLngs =
+    getAgencementContourLatLngs(ag) ||
+    buildAgencementBoundsLatLngs(ag);
+
+  return {
+    uid: `spocc_${patternKey}_${ag.id}`,
+    id: ag.id || '',
+    name: ag.name || ag.id || '',
+    description: '',
+    createdAt: new Date().toISOString(),
+
+    fragmentIds: (ag.fragmentIds || []).map(x => cleanFragmentId(x)).filter(Boolean),
+    buildingIds: (ag.buildingIds || []).map(x => cleanFragmentId(x)).filter(Boolean),
+
+    fragmentsCount: Number(ag.fragmentsCount || (ag.fragmentIds || []).length || 0),
+    buildingsCount: Number(ag.buildingsCount || (ag.buildingIds || []).length || 0),
+
+    contour: contourLatLngs
+      ? contourLatLngs.map(ll => [ll.lat, ll.lng])
+      : null,
+
+    origin: 'saved-pattern-occurrence',
+    seedable: false,
+    sourceSeedId: ag.sourceSeedId || null,
+    patternIds: (ag.patternIds || []).slice()
+  };
+}
+
+function getSavedPatternOccurrences(rec) {
+  if (!rec) return [];
+
+  const snapshots = Array.isArray(rec.occurrenceSnapshots)
+    ? rec.occurrenceSnapshots
+    : [];
+
+  let occs = snapshots
+    .map(snap => hydrateSavedAgencement({
+      uid: snap.uid || snap.id || `spocc_${Math.random().toString(36).slice(2)}`,
+      id: snap.id || '',
+      name: snap.name || snap.id || '',
+      description: snap.description || '',
+      createdAt: snap.createdAt || rec.savedAt || null,
+
+      fragmentIds: Array.isArray(snap.fragmentIds) ? snap.fragmentIds.slice() : [],
+      buildingIds: Array.isArray(snap.buildingIds) ? snap.buildingIds.slice() : [],
+
+      fragmentsCount: snap.fragmentsCount || 0,
+      buildingsCount: snap.buildingsCount || 0,
+
+      contour: snap.contour || null,
+      origin: 'saved-pattern-occurrence',
+      seedable: false
+    }))
+    .filter(ag => ag && (ag.fragmentsCount > 0 || ag.buildingsCount > 0))
+    .sort(sortAgencementsById);
+
+  // compatibilité avec anciens patterns déjà enregistrés
+  if (!occs.length) {
+    occs = (rec.occurrences || [])
+      .map(id => agencementsById.get(id))
+      .filter(Boolean)
+      .sort(sortAgencementsById);
+  }
+
+  occs.forEach(ag => {
+    ag.patternIds = [rec.patternKey];
+  });
+
+  return occs;
+}
+
+
+
+
 /* --- Création : garde le même nom de fonction publique --- */
 function openSavePatternModal(patternKey, patternData) {
   const occIds = (patternData?.occurrences || []).slice();
-  const occs = occIds.map(id => agencementsById.get(id)).filter(Boolean);
+  const occs = occIds
+    .map(id => agencementsById.get(id))
+    .filter(Boolean)
+    .sort(sortAgencementsById);
 
-  const signature = computePatternSignatureFromOccurrences(occs);
-  const elements = computeFragmentsUnionFromOccurrences(occIds); // flatten fragments pour l’affichage
+  const elements = computeFragmentsUnionFromOccurrences(occIds);
+
+  const occurrenceSnapshots = occs
+    .map(ag => buildSavedPatternOccurrenceSnapshot(ag, patternKey))
+    .filter(Boolean);
 
   openPatternEditor({
     mode: 'create',
     patternKey,
-    elements,                  // on garde ce champ pour la UI (liste)
-    criteria: signature.numericMeans, // si tu veux continuer à afficher des “valeurs”
-name: patternKey,    
-description: '',
-    headerText: 'Enregistrer ce pattern (agencements)',
+    elements,
+    name: patternKey,
+    description: '',
+    headerText: 'Enregistrer ce pattern',
     onSave: (payload) => {
       const rec = {
-        uid: 'sp_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7),
+        uid: 'sp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
 
         patternKey,
         name: payload.name,
         description: payload.description,
 
-        // ✅ vrai contenu du pattern
         occurrences: occIds.slice(),
+        occurrenceSnapshots: occurrenceSnapshots.slice(),
 
-        // ✅ “flatten” pour confort UI (photos, liste)
         elements: elements.slice(),
 
-        // ✅ signature stable
-        signature,
+        sourceAgencementId: patternData?.sourceAgencementId || null,
+        size: occIds.length,
 
-        // ✅ contexte de calcul (reproductible)
         params: getCurrentPatternParams(),
 
         savedAt: new Date().toISOString()
@@ -9795,64 +9580,94 @@ function openEditSavedPatternModal(uid) {
 }
 
 
-
-function openSavedPatternsListModal(){
+function openSavedPatternsListModal() {
   const modal = document.getElementById('saved-patterns-list-modal');
-  const body  = document.getElementById('splist-body');
+  const body = document.getElementById('splist-body');
   const closeBtn = document.getElementById('splist-close');
 
   body.innerHTML = '';
-  const items = loadSavedPatterns().slice().sort((a,b) => (new Date(b.savedAt)) - (new Date(a.savedAt)));
 
-  if (!items.length){
+  const items = loadSavedPatterns()
+    .slice()
+    .sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+
+  if (!items.length) {
     body.innerHTML = '<div style="color:#aaa">Aucun pattern enregistré pour le moment.</div>';
   } else {
     items.forEach(rec => {
       const card = document.createElement('div');
       card.className = 'saved-item';
+
       const h = document.createElement('h4');
-      h.textContent = `${rec.name}  (${rec.patternKey})`;
+      h.textContent = `${rec.name || rec.patternKey} (${rec.patternKey || '—'})`;
+
       const meta = document.createElement('div');
       meta.className = 'meta';
+
+      const occCount = Array.isArray(rec.occurrenceSnapshots)
+        ? rec.occurrenceSnapshots.length
+        : (rec.occurrences?.length || 0);
+
       meta.textContent =
-  `Enregistré: ${fmtDate(rec.savedAt)} • Occurrences: ${rec.occurrences?.length || 0} • Fragments: ${rec.elements?.length || 0}`;
+        `Enregistré : ${fmtDate(rec.savedAt)}` +
+        (rec.updatedAt ? ` • Modifié : ${fmtDate(rec.updatedAt)}` : '') +
+        ` • Occurrences : ${occCount}` +
+        ` • Fragments : ${rec.elements?.length || 0}`;
+
+      const params = document.createElement('div');
+      params.style.cssText = 'margin-top:6px;color:#bbb;font-size:12px;';
+      params.textContent =
+        `Diamètre : ${rec.params?.perimeterDiameterM ?? '—'} m • ` +
+        `Seuil : ${Number.isFinite(rec.params?.agSimilarityThreshold) ? Number(rec.params.agSimilarityThreshold).toFixed(2) : '—'}`;
+
       const row = document.createElement('div');
       row.className = 'row';
 
       const bOpen = document.createElement('button');
       bOpen.className = 'tab-btn btn-sm primary';
       bOpen.textContent = 'Consulter';
-      bOpen.onclick = () => { modal.style.display = 'none'; openSavedPatternPanel(rec.uid); };
+      bOpen.onclick = () => {
+        modal.style.display = 'none';
+        openSavedPatternPanel(rec.uid);
+      };
 
-       // ⬇️ Unifie Renommer + Modifier description
       const bEdit = document.createElement('button');
       bEdit.className = 'tab-btn btn-sm';
       bEdit.textContent = 'Modifier';
       bEdit.onclick = () => openEditSavedPatternModal(rec.uid);
 
       const bDel = document.createElement('button');
-bDel.className = 'tab-btn btn-sm danger';
-bDel.textContent = 'Supprimer';
-bDel.onclick = () => {
-  // suppression immédiate, sans confirmation
-  deleteSavedPattern(rec.uid);
-  // rafraîchir la liste
-  openSavedPatternsListModal();
-};
+      bDel.className = 'tab-btn btn-sm danger';
+      bDel.textContent = 'Supprimer';
+      bDel.onclick = () => {
+        deleteSavedPattern(rec.uid);
+        openSavedPatternsListModal();
 
+        const tabId = `saved-${rec.uid}`;
+        if (Tabbed?.openTabs?.has(tabId)) closeTab(tabId);
+      };
 
       row.append(bOpen, bEdit, bDel);
+
       const p = document.createElement('div');
       p.style.cssText = 'margin-top:6px;color:#ccc;white-space:pre-wrap';
       p.textContent = rec.description || '—';
 
-      card.append(h, meta, row, p);
+      card.append(h, meta, params, row, p);
       body.appendChild(card);
     });
   }
 
-  function close(){ modal.style.display = 'none'; cleanup(); }
-  function cleanup(){ document.querySelector('#saved-patterns-list-modal .modal__backdrop').onclick = null; closeBtn.onclick = null; }
+  function close() {
+    modal.style.display = 'none';
+    cleanup();
+  }
+
+  function cleanup() {
+    document.querySelector('#saved-patterns-list-modal .modal__backdrop').onclick = null;
+    closeBtn.onclick = null;
+  }
+
   document.querySelector('#saved-patterns-list-modal .modal__backdrop').onclick = close;
   closeBtn.onclick = close;
 
@@ -9876,161 +9691,232 @@ function openSavedPatternPanel(uid) {
 function renderSavedPatternPanel(panel, rec) {
   panel.innerHTML = '';
 
-  /* --------------------------------------------
-     1) Titre + méta
-  -------------------------------------------- */
+  const occs = getSavedPatternOccurrences(rec);
+
   const h2 = document.createElement('h2');
-  h2.textContent = `${rec.name || rec.patternKey} — (enregistré)`;
+  h2.textContent = rec.name || rec.patternKey || 'Pattern enregistré';
   panel.appendChild(h2);
 
-  const meta = document.createElement('div');
-  meta.style.cssText = 'color:#aaa;font-size:12px;margin-bottom:8px';
-  meta.textContent =
-  `ID: ${rec.patternKey} • Occurrences: ${rec.occurrences?.length || 0} • Fragments: ${rec.elements?.length || 0} • Sauvé: ${fmtDate(rec.savedAt)}` +
-  (rec.updatedAt ? ` • Modifié: ${fmtDate(rec.updatedAt)}` : '');
-  panel.appendChild(meta);
+  const pMeta = document.createElement('p');
+  pMeta.className = 'pattern-meta';
+  pMeta.textContent =
+    `ID : ${rec.patternKey || '—'} • ${occs.length} occurrences • ` +
+    `enregistré le ${fmtDate(rec.savedAt)}` +
+    (rec.updatedAt ? ` • modifié le ${fmtDate(rec.updatedAt)}` : '');
+  panel.appendChild(pMeta);
 
-  /* --------------------------------------------
-     2) Description
-  -------------------------------------------- */
-  const desc = document.createElement('p');
-  desc.textContent = rec.description || '—';
-  panel.appendChild(desc);
+  const params = rec.params || {};
+  appendSimpleBlock(panel, 'Enregistrement / paramètres', [
+    {
+      label: 'Agencement de base',
+      value: rec.sourceAgencementId || '—'
+    },
+    {
+      label: 'Diamètre',
+      value: Number.isFinite(params.perimeterDiameterM)
+        ? `${params.perimeterDiameterM} m`
+        : '—'
+    },
+    {
+      label: 'Seuil similarité',
+      value: Number.isFinite(params.agSimilarityThreshold)
+        ? Number(params.agSimilarityThreshold).toFixed(2)
+        : '—'
+    },
+    {
+      label: 'Zones',
+      value: Array.isArray(params.zones) && params.zones.length
+        ? params.zones.join(', ')
+        : '—'
+    },
+    {
+      label: 'Critères actifs',
+      value: Array.isArray(params.activeCriteriaKeys)
+        ? String(params.activeCriteriaKeys.length)
+        : '—'
+    }
+  ]);
 
-  /* --------------------------------------------
-     3) CRITÈRES COMMUNS (moyenne fuzzy)
-        => comme dans renderPatternPanel
-  -------------------------------------------- */
-  const ids = rec.elements || []; // garde pour la liste des fragments plus bas
-const signature = rec.signature || { numericMeans: rec.criteria || {}, textTokens: {} };
-const consensus = signature.numericMeans || {};
+  if (!occs.length) {
+    const msg = document.createElement('div');
+    msg.style.color = '#aaa';
+    msg.style.padding = '8px 0';
+    msg.textContent = "Aucune occurrence disponible pour ce snapshot.";
+    panel.appendChild(msg);
 
-  const critBlock = document.createElement('div');
-  critBlock.className = 'pattern-crit-block';
+    const actions = document.createElement('div');
+    actions.className = 'btn-row';
 
-  const hCrit = document.createElement('h3');
-  hCrit.textContent = 'Critères communs';
-  critBlock.appendChild(hCrit);
+    const bEdit = document.createElement('button');
+    bEdit.className = 'tab-btn btn-sm';
+    bEdit.textContent = 'Modifier';
+    bEdit.onclick = () => openEditSavedPatternModal(rec.uid);
 
-  const entries = Object.entries(consensus)
-    .filter(([k, v]) => v !== null && v >= 0.2)
-    .sort((a, b) => b[1] - a[1]);
+    const bDel = document.createElement('button');
+    bDel.className = 'tab-btn btn-sm danger';
+    bDel.textContent = 'Supprimer';
+    bDel.onclick = () => {
+      deleteSavedPattern(rec.uid);
 
-  if (!entries.length) {
-    const none = document.createElement('p');
-    none.textContent = 'Aucun critère commun significatif.';
-    none.style.color = '#aaa';
-    critBlock.appendChild(none);
-  } else {
-    entries.forEach(([k, v]) => {
-      const row = document.createElement('div');
-      row.className = 'crit-row';
+      const tabId = `saved-${rec.uid}`;
+      if (Tabbed?.openTabs?.has(tabId)) closeTab(tabId);
 
-      const label = document.createElement('span');
-      label.className = 'crit-label';
-      label.textContent = k.replace(/_/g, ' ');
+      const listModal = document.getElementById('saved-patterns-list-modal');
+      if (listModal && listModal.style.display === 'block') {
+        openSavedPatternsListModal();
+      }
+    };
 
-      const val = document.createElement('span');
-      val.className = 'crit-value';
-      val.textContent = v.toFixed(2);
-
-      row.append(label, val);
-      critBlock.appendChild(row);
-    });
+    actions.append(bEdit, bDel);
+    panel.appendChild(actions);
+    return;
   }
 
-  if (rec.params) {
-  const p = document.createElement('div');
-  p.style.cssText = 'color:#aaa;font-size:12px;margin:8px 0';
-  p.textContent = `Paramètres: diamètre ${rec.params.perimeterDiameterM}m • seuil ${Number(rec.params.agSimilarityThreshold).toFixed(2)} • zones ${((rec.params.zones||[]).join(', ') || '—')}`;
-  panel.appendChild(p);
-}
+  function compactRecurringList(items = [], { minCount = 2, maxItems = 5 } = {}) {
+    return (items || [])
+      .filter(item => Number(item.count || 0) >= minCount)
+      .slice(0, maxItems)
+      .map(item => item.label);
+  }
 
-  panel.appendChild(critBlock);
+  function compactCountRange(values = []) {
+    const nums = (values || [])
+      .map(v => Number(v))
+      .filter(Number.isFinite);
 
+    if (!nums.length) return '—';
 
-  const textSignature = signature.textTokens || {};
+    const min = Math.min(...nums);
+    const max = Math.max(...nums);
 
-const textBlock = document.createElement('div');
-textBlock.className = 'pattern-crit-block';
+    return min === max ? `${min}` : `${min}–${max}`;
+  }
 
-const hText = document.createElement('h3');
-hText.textContent = 'Critères textuels';
-textBlock.appendChild(hText);
+  const grouping = computePatternGroupingLogic(occs);
+  const fragmentCounts = occs.map(ag => Number(ag.fragmentsCount || 0));
+  const buildingCounts = occs.map(ag => Number(ag.buildingsCount || 0));
 
-let hasAnyText = false;
+  appendSimpleBlock(panel, 'Structure récurrente', [
+    {
+      label: 'Fragments',
+      value: compactCountRange(fragmentCounts)
+    },
+    {
+      label: 'Bâtiments',
+      value: compactCountRange(buildingCounts)
+    },
+    {
+      label: 'Base',
+      value: rec.sourceAgencementId || '—'
+    }
+  ]);
 
-Object.entries(textSignature).forEach(([k, arr]) => {
-  if (!arr || !arr.length) return;
-  hasAnyText = true;
+  appendSimpleBlock(panel, 'Grappes récurrentes', [
+    {
+      label: 'Usages',
+      value: compactRecurringList(grouping.recurringTexts.usages).join(', ') || '—'
+    },
+    {
+      label: 'Acteurs',
+      value: compactRecurringList(grouping.recurringTexts.acteur_actif).join(', ') || '—'
+    },
+    {
+      label: 'Initiateurs',
+      value: compactRecurringList(grouping.recurringTexts.initiateur).join(', ') || '—'
+    },
+    {
+      label: 'Éléments',
+      value: compactRecurringList(grouping.recurringTexts.elements_spatiaux).join(', ') || '—'
+    }
+  ]);
 
-  const row = document.createElement('div');
-  row.className = 'crit-row';
+  appendSimpleBlock(panel, 'Contexte / temporalités', [
+    {
+      label: 'Bâti',
+      value: compactRecurringList(grouping.recurringBuildingStates, { maxItems: 3 }).join(', ') || '—'
+    },
+    {
+      label: 'Fonctions',
+      value: compactRecurringList(grouping.recurringBuildingFunctions, { maxItems: 3 }).join(', ') || '—'
+    },
+    {
+      label: 'Temporalités',
+      value: compactRecurringList(grouping.recurringTemporalStatuses, { maxItems: 3 }).join(', ') || '—'
+    }
+  ]);
 
-  const label = document.createElement('span');
-  label.className = 'crit-label';
-  label.textContent = prettyKey(k);
-
-  const val = document.createElement('span');
-  val.className = 'crit-value';
-  val.textContent = arr.slice(0, 10).join(', ') + (arr.length > 10 ? '…' : '');
-
-  row.append(label, val);
-  textBlock.appendChild(row);
-});
-
-if (!hasAnyText) {
-  const none = document.createElement('p');
-  none.textContent = 'Aucun critère textuel commun.';
-  none.style.color = '#aaa';
-  textBlock.appendChild(none);
-}
-
-panel.appendChild(textBlock);
-
-  /* --------------------------------------------
-     4) Liste des fragments membres
-        => simple, même style que pattern normal
-  -------------------------------------------- */
   const list = document.createElement('div');
   list.className = 'pattern-members';
 
-  const all = [...(dataGeojson || []), ...(datamGeojson || [])];
-  const byId = new Map(all.map(f => [f.properties.id, f]));
+  const hList = document.createElement('h3');
+  hList.textContent = 'Occurrences';
+  list.appendChild(hList);
 
-  ids.forEach(id => {
-    const f = byId.get(id);
-    if (!f) return;
+  const byFragId = getGalleryFragmentsById();
+  const allBlds = [...(batimentsMontreuilGeojson || []), ...(batimentsToulouseGeojson || [])];
+  const byBldId = new Map(
+    allBlds.map(b => [cleanFragmentId(b.properties?.id), b])
+  );
 
+  occs.forEach(ag => {
     const row = document.createElement('div');
     row.className = 'member-row';
 
-    // miniature
+    const liveAg = agencementsById.get(ag.id);
+
+    if (liveAg) {
+      row.style.cursor = 'pointer';
+    }
+
     const thumb = document.createElement('div');
     thumb.className = 'member-thumb';
-    const p = normalizePhotos(f.properties.photos)[0];
-    if (p) thumb.style.backgroundImage = `url("${p}")`;
 
-    // nom
+    let foundPhoto = null;
+    for (const fid of (ag.fragmentIds || [])) {
+      const f = byFragId.get(cleanFragmentId(fid));
+      if (!f) continue;
+
+      const p = normalizePhotos(f.properties?.photos)[0];
+      if (p) {
+        foundPhoto = p;
+        break;
+      }
+    }
+
+    if (foundPhoto) {
+      thumb.style.backgroundImage = `url("${foundPhoto}")`;
+    }
+
     const right = document.createElement('div');
     right.className = 'member-right';
 
     const title = document.createElement('div');
     title.className = 'member-title';
-    title.textContent = f.properties.name || id;
+    title.textContent = ag.name || ag.id;
 
-    right.append(title);
+    const info = document.createElement('div');
+    info.className = 'member-info';
+    info.textContent = `${ag.fragmentsCount} fragments • ${ag.buildingsCount} bâtiments`;
+
+    right.append(title, info);
     row.append(thumb, right);
 
-    row.addEventListener('click', () => showDetails(f.properties));
+    if (liveAg) {
+      row.addEventListener('click', () => {
+        openTab({
+          id: `ag-${liveAg.id}`,
+          title: liveAg.name || liveAg.id,
+          kind: 'agencement',
+          render: (p) => renderAgencementPanel(p, liveAg, { byFragId, byBldId })
+        });
+      });
+    }
+
     list.appendChild(row);
   });
 
   panel.appendChild(list);
 
-  /* --------------------------------------------
-     5) Actions
-  -------------------------------------------- */
   const actions = document.createElement('div');
   actions.className = 'btn-row';
 
@@ -10044,8 +9930,14 @@ panel.appendChild(textBlock);
   bDel.textContent = 'Supprimer';
   bDel.onclick = () => {
     deleteSavedPattern(rec.uid);
-    const idTab = `saved-${rec.uid}`;
-    if (Tabbed?.openTabs?.has(idTab)) closeTab(idTab);
+
+    const tabId = `saved-${rec.uid}`;
+    if (Tabbed?.openTabs?.has(tabId)) closeTab(tabId);
+
+    const listModal = document.getElementById('saved-patterns-list-modal');
+    if (listModal && listModal.style.display === 'block') {
+      openSavedPatternsListModal();
+    }
   };
 
   actions.append(bEdit, bDel);
@@ -10107,6 +9999,14 @@ function setFragmentTimeMode(mode) {
   currentFragmentTimeMode = mode;
   updateInterfaceElements(currentView);
 
+  if (currentPatternMode === 'patterns') {
+    const { visibleFragments, visibleBuildings } = getVisibleSpatialFeaturesForPatterns();
+    recomputeAgencementPatterns({
+      fragments: visibleFragments,
+      buildings: visibleBuildings
+    });
+  }
+
   if (currentView === 'map') {
     renderFragmentsMapByTimeMode();
     restyleBuildingsOnFragmentsMap();
@@ -10124,7 +10024,6 @@ function setFragmentTimeMode(mode) {
     }
   }
 }
-
 
 
 
