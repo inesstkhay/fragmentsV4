@@ -238,33 +238,6 @@ input[type="range"] {
   visibility: hidden;     /* hide buttons but keep bar height */
 }
 
-/* La sous-barre Unit, au-dessus de la carte aussi */
-/* Sub-bar: always visible under the main navbar */
-#subnav-unit {
-  position: absolute;
-  top: 38px;              /* just under the navbar */
-  left: 0;
-  right: 0;
-  z-index: 1060;
-  background: #000;
-  border-bottom: 1px solid #4d4d4d;
-  padding: 6px 10px;
-  display: flex;          /* always displayed */
-  gap: 8px;
-  align-items: center;
-  min-height: 36px;       /* consistent height across views */
-}
-
-/* When not on “Patterns”, keep the bar but hide the controls */
-#subnav-unitsubnav--inactive {
-  pointer-events: none;   /* no interaction */
-}
-
-#subnav-unit.subnav--inactive .sub-tab,
-#subnav-unit.subnav--inactive .sub-action {
-  visibility: hidden;     /* hide buttons but keep bar height */
-}
-
 
 .subnav--inactive {
   display: none !important;
@@ -512,8 +485,6 @@ input[type="range"] {
 .crit-value{
   display: inline-block;   /* ou block si tu préfères */
   min-width: 3ch;          /* optionnel: évite que ça “saute” */
-  text-align: right;       /* <- alignement à droite */
-
   background:transparent;
   border:none;
   box-shadow:none;
@@ -604,78 +575,6 @@ input[type="range"] {
 }
 .three-label.usage   { color: #ff3b3b; border-color: rgba(255,59,59,.35); }
 .three-label.discours{ color: #fff;    border-color: rgba(255,255,255,.25); }
-
-/* ====== Inspecteur Unité (V1/V2/Compare) ====== */
-/* mêmes styles que la modale 3D */
-#unit-modal.modal { position:fixed; inset:0; z-index:4002; }
-#unit-modal .modal__backdrop { position:absolute; inset:0; background:rgba(0,0,0,.55); }
-#unit-modal .modal__dialog { position:relative; margin:4vh auto; width:min(1100px, 92vw); height:min(84vh, 92vh); background:#111; border:1px solid #333; border-radius:8px; display:flex; flex-direction:column; }
-#unit-modal .modal__head { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid #222; background:#0b0b0b; }
-#unit-modal .modal__body { position:relative; flex:1; padding:0; }
-#unit-modal .three-host { width:100%; height:100%; }
-/* Par défaut on cache la vue comparer — le JS l’affiche au besoin */
-#unit-modal .compare-host {
-  display: none;
-  gap: 8px;
-  width: 100%;
-  height: 100%;
-  padding: 8px;
-  box-sizing: border-box;
-}
-
-/* La vue simple garde toute la place */
-#unit-modal #unit-single-host {
-  display: block;
-}
-
-#unit-modal .unit-col { flex:1; background:#0a0a0a; border:1px solid #222; border-radius:6px; overflow:hidden; }
-#unit-modal .modal__actions .tab-btn { margin-left:6px; }
-
-
-/* Tous les conteneurs qui reçoivent un viewer Three.js */
-.three-host {
-  position: relative;   /* indispensable pour CSS2DRenderer (labels) */
-  width: 100%;
-  height: 100%;
-  overflow: hidden;     /* évite tout débordement d’éléments internes */
-}
-
-/* Dans la modale Unité */
-#unit-modal .three-host { position: relative; }
-
-/* Colonnes du mode comparer */
-#unit-modal .unit-col > div { position: relative; }
-
-
-/* ---- En-tête de modale partagé (3D & Unité) ---- */
-.modal__head{
-  display:flex; align-items:center; justify-content:space-between;
-  padding:10px 12px; border-bottom:1px solid #222; background:#0b0b0b;
-}
-.modal__actions .tab-btn{ margin-left:6px; }
-
-/* ---- Modale 3D : même gabarit que l’Unité ---- */
-#three-modal{ position:fixed; inset:0; z-index:4005; }
-#three-modal .modal__backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.55); }
-#three-modal .modal__dialog{
-  position:relative;
-  margin:8vh auto;
-  width:min(900px, 92vw);
-  height:min(700px, 80vh);
-  background:#111;
-  border:1px solid #333;
-  border-radius:8px;
-  display:flex; flex-direction:column;
-  box-shadow:0 10px 40px rgba(0,0,0,.45);
-}
-#three-modal .three-host{ flex:1; min-height:300px; }
-
-/* Optionnel : si tu veux exactement le même espacement que l’Unité */
-#three-window .modal__actions .tab-btn{ margin-left:6px; }
-
-.photo { width: 100%; margin: 5px 0; }
-
-#gallery-view { z-index: 1500; }
 
 
 .saved-item {
@@ -1169,4 +1068,93 @@ input[type="range"] {
 
 #subnav-placeholder-level3.subnav--inactive{
   display: none !important;
+}
+
+/* ==================================================
+   MODE IMAGE — toggle + marqueurs photo
+================================================== */
+
+#fragment-time-controls.image-mode-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+#fragment-time-controls .fragment-time-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+#toggle-image-view-btn {
+  width: 110px;
+  text-align: center;
+}
+
+/* Marqueurs photo flottants sur la carte patterns/agencements */
+.photo-floating-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.floating-photo-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0;
+  background: #111;
+  box-shadow: none;
+  border: none;
+}
+
+.floating-photo-card img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.floating-photo-card__empty {
+  width: 100%;
+  height: 100%;
+  background: #2a2a2a;
+  pointer-events: none;
+}
+
+/* Plus utilisé, mais on le neutralise au cas où */
+.floating-photo-card__label {
+  display: none;
+}
+
+.photo-floating-marker {
+  transition: opacity 0.14s ease;
+}
+
+.photo-floating-marker .floating-photo-card {
+  transform-origin: center center;
+  transition:
+    transform 0.14s ease,
+    opacity 0.14s ease,
+    filter 0.14s ease;
+}
+
+.photo-hover-active .photo-floating-marker:not(.is-hovered) .floating-photo-card {
+  opacity: 0.18;
+  filter: grayscale(0.4);
+}
+
+.photo-floating-marker.is-hovered {
+  z-index: 9999 !important;
+}
+
+.photo-floating-marker.is-hovered .floating-photo-card {
+  transform: scale(1.45);
+  opacity: 1;
+  filter: none;
+}
+
+.floating-photo-card.is-selected {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
 }

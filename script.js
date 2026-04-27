@@ -22,7 +22,7 @@ const toulouseZoom = 15;
 ================================================== */
 
 let PERIMETER_DIAMETER_M = 100;
-let AG_SIM_THRESHOLD = 0.55;
+let AG_SIM_THRESHOLD = 0.50;
 
 let MIN_AG_FRAGMENTS = 2;
 let ALLOW_SINGLE_FRAGMENT_WITH_BUILDINGS = true;
@@ -38,8 +38,13 @@ let MIN_PATTERN_OCCURRENCES = 2;
 let SIM_THRESHOLD = 0.75;
 let COMP_THRESHOLD = 0.60;
 
-let MIN_COMMON_NON_NULL = 3;
+let MIN_COMMON_NON_NULL = 2;
 let MAX_NULL_MISMATCH_RATIO = 0.20;
+
+let FUZZY_SUITE_TOLERANCE = 0.30;
+let TEXT_SUITE_MIN_JACCARD = 0.40;
+let TEXT_SUITE_MATCH_ANY_COMMON_TOKEN = true;
+let SUITE_NULL_MISMATCH_WEIGHT = 0.35;
 
 /* ==================================================
    0.4) OULEURS POUR LES FONCTIONS DE BÂTIMENTS
@@ -111,36 +116,6 @@ const ALL_CRITERIA_KEYS = [
 ];
 
 
-const FUZZY_GROUPS = {
-  PA: [
-    "PA_P1_intensitesoin",
-    "PA_P1_frequencegestes",
-    "PA_P1_degrecooperation",
-    "PA_P2_degretransformation",
-    "PA_P2_perrenite",
-    "PA_P2_autonomie",
-    "PA_P3_intensiteusage",
-    "PA_P3_frequenceusage",
-    "PA_P3_diversitepublic",
-    "PA_P3_conflitusage"
-  ],
-  DH: [
-    "DH_P1_degreinformalite",
-    "DH_P1_echellepratique",
-    "DH_P1_degremutualisation",
-    "DH_P2_degreorganisation",
-    "DH_P2_porteepolitique",
-    "DH_P2_effetspatial",
-    "DH_P3_attachement",
-    "DH_P4_intensiteflux"
-  ],
-  FS: [
-    "FS_P1_presenceinstitutionnelle",
-    "FS_P1_intensitecontrole",
-    "FS_P2_abandon",
-    "FS_P3_pressionfonciere"
-  ]
-};
 
 
 /* ==================================================
@@ -156,7 +131,7 @@ const LIT_SEQ = [58, 70, 50, 64];
 ================================================== */
 
 // interdit qu'une occurrence soit presque au même endroit que la graine
-let MIN_OCCURRENCE_DISTANCE_FACTOR = 1.5;
+let MIN_OCCURRENCE_DISTANCE_FACTOR = 1.3;
 
 // interdit qu'une occurrence reprenne exactement les mêmes fragments
 let REJECT_EXACT_SAME_FRAGMENT_SET = true;
@@ -170,9 +145,16 @@ let MIN_DISTINCT_OCCURRENCE_SIMILARITY = 0.88;
    0.6) Paramètres temporalités
 ================================================== */
 
-let TEMPORAL_STATUS_PENALTY = 0.60;
+let TEMPORAL_STATUS_PENALTY = 0.50;
 let TEMPORAL_APP_DIS_STRICT = true;
 let TEMPORAL_MIN_MATCH_SCORE = 0.05;
+
+/* ==================================================
+   0.6) Poids des critères dans les similarités d’agencement
+================================================== */
+
+let FUZZY_CRITERION_WEIGHT = 1;
+let TEXT_CRITERION_WEIGHT = 2;
 
 /* ==================================================
    0.7) Clés localStorage
@@ -197,6 +179,19 @@ const PATTERN_COLORS = Object.fromEntries(
   })
 );
 
+/* ==================================================
+   0.9) Paramètres du mode image
+================================================== */
+
+const PROX_IMAGE_NODE_WIDTH = 56;
+const PROX_IMAGE_NODE_HEIGHT = 40;
+const PROX_IMAGE_COLLIDE_RADIUS = 34;
+
+const MAP_IMAGE_MARKER_BASE_WIDTH = 58;
+const MAP_IMAGE_MARKER_BASE_HEIGHT = 42;
+const MAP_IMAGE_COLLISION_PADDING = 8;
+const MAP_IMAGE_OFFSET_STEP = 18;
+const MAP_IMAGE_OFFSET_MAX_ATTEMPTS = 24;
 
 
 /* ==================================================
@@ -212,7 +207,6 @@ let currentView = 'map';
 let currentLocation = 'montreuil';
 
 let currentFragmentSub = 'map';
-let currentUnitSub = 'map';
 
 let currentPatternMode = 'agencements'; // agencements | patterns
 let currentPatternView = 'map';         // map | proxemic | gallery
@@ -221,6 +215,8 @@ let currentComparisonLeft = '';
 let currentComparisonRight = '';
 
 let SHOW_DIFFRACTIONS = false;
+
+let IMAGE_VIEW_MODE = false;
 
 /* ==================================================
    1.2) Données chargées / calculées
@@ -315,6 +311,8 @@ let patternPanes = new Map();       // pane par anneau
 
 let patternMembersLayer = null;     // fragments + bâtiments colorés par pattern
 let savedAgencementsLayer = null;
+
+let patternImagesLayer = null;
 
 /* ==================================================
    1.8) Agencement manuel / caches
@@ -636,11 +634,6 @@ function jaccardSimilarity(listA, listB) {
   return uni ? (inter / uni) : 0;
 }
 
-function average(nums) {
-  const vals = (nums || []).filter(v => Number.isFinite(v));
-  if (!vals.length) return null;
-  return vals.reduce((a, b) => a + b, 0) / vals.length;
-}
 
 function featureToVector(feature) {
   if (!feature) return [];
@@ -758,13 +751,294 @@ function topVectorDifferences(vecA, vecB, { topN = 3 } = {}) {
   return diffs.slice(0, Math.max(1, topN));
 }
 
-function averageActiveFuzzyForFeature(feature, keys = []) {
-  const vals = (keys || [])
-    .filter(k => ACTIVE_CRITERIA_KEYS.has(k))
-    .map(k => parseFuzzy(feature?.properties?.[k]))
-    .filter(v => v !== null && Number.isFinite(v));
+const DISCRETE_FUZZY_VALUES = [0, 0.25, 0.5, 0.75, 1];
 
-  return vals.length ? average(vals) : null;
+function getDynamicFuzzySuiteTolerance() {
+  /*
+    Double tolérance :
+    - le slider AG_SIM_THRESHOLD filtre toujours le score final d'agencement ;
+    - mais il assouplit aussi localement les comparaisons fuzzy.
+
+    Exemple :
+    seuil 1.00 → tolérance 0.00 → seules les valeurs identiques matchent
+    seuil 0.75 → tolérance 0.25 → 0.50 et 0.75 deviennent proches
+    seuil 0.50 → tolérance max 0.30 → valeurs voisines proches, mais pas tout avec tout
+  */
+  const sliderTolerance = 1 - Number(AG_SIM_THRESHOLD || 1);
+
+  return Math.max(
+    0,
+    Math.min(FUZZY_SUITE_TOLERANCE, sliderTolerance)
+  );
+}
+
+function fuzzyToDiscreteValue(value) {
+  const v = parseFuzzy(value);
+  if (v === null) return null;
+
+  /*
+    Les critères fuzzy n'ont que 5 valeurs possibles :
+    0, 0.25, 0.5, 0.75, 1.
+
+    On garde une petite tolérance pour éviter les problèmes
+    d'arrondis éventuels du type 0.5000000001.
+  */
+  const EPS = 0.001;
+
+  for (const allowed of DISCRETE_FUZZY_VALUES) {
+    if (Math.abs(v - allowed) <= EPS) {
+      return allowed;
+    }
+  }
+
+  // Si une valeur inattendue apparaît, on la considère comme non renseignée.
+  return null;
+}
+
+function featureToCriterionSuite(feature) {
+  if (!feature) return [];
+
+  if (
+    feature.__criterionSuiteCache &&
+    feature.__criterionSuiteCacheKey === ACTIVE_CRITERIA_CACHE_KEY
+  ) {
+    return feature.__criterionSuiteCache;
+  }
+
+  const props = feature.properties || {};
+
+  const suite = ALL_CRITERIA_KEYS.map(key => {
+    if (!ACTIVE_CRITERIA_KEYS.has(key)) return null;
+
+    if (TEXT_KEYS.includes(key)) {
+      const tokens = parseMultiText(props[key]) || [];
+
+      return {
+        key,
+        kind: "text",
+        tokens: uniqClean(tokens)
+      };
+    }
+
+    const value = fuzzyToDiscreteValue(props[key]);
+
+return {
+  key,
+  kind: "fuzzy",
+  value
+};
+  });
+
+  feature.__criterionSuiteCache = suite;
+  feature.__criterionSuiteCacheKey = ACTIVE_CRITERIA_CACHE_KEY;
+
+  return suite;
+}
+
+function isCriterionSuiteItemEmpty(item) {
+  if (!item) return true;
+
+  if (item.kind === "text") {
+    return !Array.isArray(item.tokens) || item.tokens.length === 0;
+  }
+
+  if (item.kind === "fuzzy") {
+    return item.value === null || item.value === undefined;
+  }
+
+  return true;
+}
+
+function criterionSuiteItemToSortToken(item) {
+  if (!item) return null;
+
+  if (isCriterionSuiteItemEmpty(item)) {
+    return `${item.key}:Ø`;
+  }
+
+  if (item.kind === "text") {
+    return `${item.key}:T:${item.tokens.join("+")}`;
+  }
+
+  if (item.kind === "fuzzy") {
+  return `${item.key}:F:${item.value}`;
+}
+
+  return `${item.key}:Ø`;
+}
+
+function criterionSuiteToLexKey(suite = []) {
+  const tokens = (suite || [])
+    .map(criterionSuiteItemToSortToken)
+    .filter(Boolean);
+
+  return tokens.length ? tokens.join("|") : "Ø";
+}
+
+function compareCriterionSuiteItems(itemA, itemB) {
+  const emptyA = isCriterionSuiteItemEmpty(itemA);
+  const emptyB = isCriterionSuiteItemEmpty(itemB);
+
+  if (emptyA && emptyB) {
+    return {
+      used: false,
+      comparable: false,
+      nullMismatch: false,
+      match: false,
+      score: 0
+    };
+  }
+
+  if (emptyA || emptyB) {
+    return {
+      used: true,
+      comparable: false,
+      nullMismatch: true,
+      match: false,
+      score: 0
+    };
+  }
+
+  if (itemA.kind !== itemB.kind) {
+    return {
+      used: true,
+      comparable: false,
+      nullMismatch: false,
+      match: false,
+      score: 0
+    };
+  }
+
+  if (itemA.kind === "text") {
+    const sim = jaccardSimilarity(itemA.tokens, itemB.tokens);
+    const hasCommonToken = sim > 0;
+
+    const match =
+      sim >= TEXT_SUITE_MIN_JACCARD ||
+      (TEXT_SUITE_MATCH_ANY_COMMON_TOKEN && hasCommonToken);
+
+    return {
+      used: true,
+      comparable: true,
+      nullMismatch: false,
+      match,
+      score: match ? 1 : 0,
+      detail: {
+        type: "text",
+        jaccard: sim
+      }
+    };
+  }
+
+  if (itemA.kind === "fuzzy") {
+  const a = Number(itemA.value);
+  const b = Number(itemB.value);
+
+  const delta = Math.abs(a - b);
+  const tolerance = getDynamicFuzzySuiteTolerance();
+
+  const exactMatch = delta === 0;
+  const closeMatch = tolerance > 0 && delta <= tolerance;
+
+  /*
+    Score local :
+    - 1 si les deux valeurs sont identiques ;
+    - entre 0.5 et 1 si elles sont proches ;
+    - 0 si elles sont trop éloignées.
+
+    Exemple avec seuil 0.75 :
+    tolerance = 0.25
+    0.50 ↔ 0.75 donne score 0.50
+
+    Exemple avec seuil 0.50 :
+    tolerance = 0.30
+    0.50 ↔ 0.75 donne score environ 0.58
+  */
+  let score = 0;
+
+  if (exactMatch) {
+    score = 1;
+  } else if (closeMatch) {
+    score = 1 - 0.5 * (delta / tolerance);
+  }
+
+  return {
+    used: true,
+    comparable: true,
+    nullMismatch: false,
+    match: exactMatch || closeMatch,
+    score,
+    detail: {
+      type: "fuzzy",
+      delta,
+      tolerance,
+      exactMatch,
+      closeMatch
+    }
+  };
+}
+
+  return {
+    used: true,
+    comparable: false,
+    nullMismatch: false,
+    match: false,
+    score: 0
+  };
+}
+
+function similarityCriterionSuites(suiteA = [], suiteB = []) {
+  const maxLen = Math.max(
+    suiteA.length,
+    suiteB.length,
+    ALL_CRITERIA_KEYS.length
+  );
+
+  let usedCount = 0;
+  let comparableCount = 0;
+
+  let usedWeight = 0;
+  let nullMismatchWeight = 0;
+  let scoreSum = 0;
+
+  for (let i = 0; i < maxLen; i++) {
+    const result = compareCriterionSuiteItems(suiteA[i], suiteB[i]);
+
+    if (!result.used) continue;
+
+    const item = suiteA[i] || suiteB[i];
+    const weight =
+      item?.kind === "text"
+        ? TEXT_CRITERION_WEIGHT
+        : FUZZY_CRITERION_WEIGHT;
+
+    usedCount++;
+    usedWeight += weight;
+
+    if (result.comparable) comparableCount++;
+
+    if (result.nullMismatch) {
+      nullMismatchWeight += weight;
+    }
+
+    scoreSum += Number(result.score || 0) * weight;
+  }
+
+  if (!usedCount || !usedWeight) return 0;
+
+  if (comparableCount < MIN_COMMON_NON_NULL) {
+    return 0;
+  }
+
+  const nullMismatchRatio = nullMismatchWeight / usedWeight;
+  const rawScore = scoreSum / usedWeight;
+
+  const nullPenalty =
+    nullMismatchRatio > MAX_NULL_MISMATCH_RATIO
+      ? 1 - SUITE_NULL_MISMATCH_WEIGHT
+      : 1 - (nullMismatchRatio * SUITE_NULL_MISMATCH_WEIGHT);
+
+  return Math.max(0, Math.min(1, rawScore * nullPenalty));
 }
 
 
@@ -1029,6 +1303,437 @@ function ensureImgObserver() {
   });
 
   return __imgObserver;
+}
+
+function getFeaturePrimaryPhotoUrl(feature) {
+  const photos = normalizePhotos(feature?.properties?.photos);
+
+  for (const src of photos) {
+    const clean = cleanPhotoUrl(src);
+    if (clean) return clean;
+  }
+
+  return null;
+}
+
+function getProxemicNodeBoxDimensions() {
+  return {
+    width: PROX_IMAGE_NODE_WIDTH,
+    height: PROX_IMAGE_NODE_HEIGHT
+  };
+}
+
+function getProxemicNodeFootprintPoints(node) {
+  if (!node) return [];
+
+  if (!IMAGE_VIEW_MODE) {
+    return [[node.x, node.y]];
+  }
+
+  const { width, height } = getProxemicNodeBoxDimensions();
+  const hw = width / 2;
+  const hh = height / 2;
+
+  return [
+    [node.x - hw, node.y - hh],
+    [node.x + hw, node.y - hh],
+    [node.x + hw, node.y + hh],
+    [node.x - hw, node.y + hh]
+  ];
+}
+
+function drawProxemicNodeVisuals(
+  nodes,
+  {
+    styleResolver = null,
+    selectedResolver = null
+  } = {}
+) {
+  const getStyle = (d) => {
+    if (typeof styleResolver === "function") return styleResolver(d);
+
+    return {
+      fill: "#fff",
+      fillOpacity: 1,
+      stroke: "#222",
+      strokeOpacity: 1
+    };
+  };
+
+  if (IMAGE_VIEW_MODE) {
+    const { width, height } = getProxemicNodeBoxDimensions();
+
+    nodes.each(function (d) {
+      const g = d3.select(this);
+      const photoUrl = getFeaturePrimaryPhotoUrl(d.feature);
+
+      // Rectangle support : sans contour, sans arrondi.
+      // Il sert aussi de zone cliquable si l'image est absente.
+      g.append("rect")
+        .attr("x", -width / 2)
+        .attr("y", -height / 2)
+        .attr("width", width)
+        .attr("height", height)
+        .attr("rx", 0)
+        .attr("ry", 0)
+        .style("fill", photoUrl ? "#111" : "#2a2a2a")
+        .style("fill-opacity", 1)
+        .style("stroke", "none")
+        .style("cursor", "pointer");
+
+      // Image pleine largeur / pleine hauteur.
+      if (photoUrl) {
+        g.append("image")
+          .attr("href", photoUrl)
+          .attr("x", -width / 2)
+          .attr("y", -height / 2)
+          .attr("width", width)
+          .attr("height", height)
+          .attr("preserveAspectRatio", "xMidYMid slice")
+          .style("pointer-events", "none");
+      }
+    });
+
+    return;
+  }
+
+  nodes.append("circle")
+    .attr("r", (d) => {
+      const isSelected = selectedResolver ? !!selectedResolver(d) : false;
+      return isSelected ? 11 : 8;
+    })
+    .style("fill", (d) => getStyle(d).fill)
+    .style("fill-opacity", (d) => getStyle(d).fillOpacity)
+    .style("stroke", (d) => {
+      const isSelected = selectedResolver ? !!selectedResolver(d) : false;
+      return isSelected ? "#ffffff" : getStyle(d).stroke;
+    })
+    .style("stroke-opacity", (d) => getStyle(d).strokeOpacity)
+    .style("stroke-width", (d) => {
+      const isSelected = selectedResolver ? !!selectedResolver(d) : false;
+      return isSelected ? 3 : 1.2;
+    })
+    .style("cursor", "pointer");
+
+  nodes.append("text")
+    .text((d) => d.id)
+    .attr("dy", "0.35em")
+    .style("text-anchor", "middle")
+    .style("font-size", "7px")
+    .style("font-weight", "bold")
+    .style("fill", "#000")
+    .style("pointer-events", "none");
+}
+
+function drawPatternMembershipFrames(nodes) {
+  nodes.each(function (d) {
+    if (!d.patterns || !d.patterns.length) return;
+
+    const g = d3.select(this);
+    const ordered = d.patterns
+      .slice()
+      .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+
+    if (IMAGE_VIEW_MODE) {
+      const { width, height } = getProxemicNodeBoxDimensions();
+
+      ordered.forEach((p, i) => {
+        const pad = 4 + i * 4;
+
+        g.append("rect")
+          .attr("x", -(width / 2) - pad)
+          .attr("y", -(height / 2) - pad)
+          .attr("width", width + pad * 2)
+          .attr("height", height + pad * 2)
+          .style("fill", "none")
+          .style("stroke", colorForPattern ? colorForPattern(p) : "#999")
+          .style("stroke-width", 2)
+          .style("pointer-events", "none");
+      });
+
+      return;
+    }
+
+    ordered.forEach((p, i) => {
+      g.append("circle")
+        .attr("r", 11 + i * 3)
+        .style("fill", "none")
+        .style("stroke", colorForPattern ? colorForPattern(p) : "#999")
+        .style("stroke-width", 2)
+        .style("pointer-events", "none");
+    });
+  });
+}
+
+function getPatternImageMarkerSize(leafletMap = patternMap) {
+  const zoom = leafletMap?.getZoom?.() ?? 15;
+  const scale = Math.max(0.70, Math.min(1.90, 1 + (zoom - 15) * 0.18));
+
+  return {
+    width: Math.round(MAP_IMAGE_MARKER_BASE_WIDTH * scale),
+    height: Math.round(MAP_IMAGE_MARKER_BASE_HEIGHT * scale)
+  };
+}
+
+function buildFloatingPhotoIcon(feature, { selected = false, offset = { x: 0, y: 0 } } = {}) {
+  const photoUrl = getFeaturePrimaryPhotoUrl(feature);
+  const label = escapeHtml(feature?.properties?.id || "fragment");
+  const { width, height } = getPatternImageMarkerSize(patternMap);
+
+  const ox = Number(offset?.x) || 0;
+  const oy = Number(offset?.y) || 0;
+
+  const selectedClass = selected ? " is-selected" : "";
+
+  const html = `
+    <div
+      class="floating-photo-card${selectedClass}"
+      style="
+        width:${width}px;
+        height:${height}px;
+      "
+    >
+      ${
+        photoUrl
+          ? `<img src="${photoUrl}" alt="${label}" referrerpolicy="no-referrer">`
+          : `<div class="floating-photo-card__empty"></div>`
+      }
+    </div>
+  `;
+
+  return L.divIcon({
+    className: "photo-floating-marker",
+    html,
+    iconSize: [width, height],
+
+    /*
+      Important :
+      Leaflet place le point géographique sur l'iconAnchor.
+      Donc si on veut déplacer visuellement la carte vers +x / +y,
+      on décale l'ancre dans le sens inverse.
+    */
+    iconAnchor: [
+      Math.round(width / 2 - ox),
+      Math.round(height / 2 - oy)
+    ]
+  });
+}
+
+function renderPatternImageMarkers(features = []) {
+  if (!patternMap || !patternImagesLayer) return;
+
+  patternImagesLayer.clearLayers();
+
+  const imagePane = patternMap.getPane("pane-pattern-image-markers");
+  if (imagePane) {
+    imagePane.classList.remove("photo-hover-active");
+  }
+
+  if (!IMAGE_VIEW_MODE) return;
+
+  const unique = new Map();
+
+  (features || []).forEach((feature) => {
+    if (!feature || feature?.properties?.isBuilding || feature?.properties?.isDiscourse) return;
+
+    const id = cleanFragmentId(feature?.properties?.id);
+    if (!id) return;
+
+    if (!isFeatureInActiveZones(feature)) return;
+    if (!featureHasAnyActiveCriterion(feature)) return;
+
+    // En mode Patterns / Patterns :
+    // on n'affiche les images que pour les fragments réellement membres d'un pattern.
+    // En mode Agencements, on garde le comportement normal.
+    if (currentPatternMode === "patterns" && !isFragmentInCurrentPatterns(feature)) return;
+
+    if (!unique.has(id)) {
+      unique.set(id, feature);
+    }
+  });
+
+  /*
+    On prépare une liste avec :
+    - la feature
+    - son centre géographique
+    - sa position écran actuelle en pixels
+
+    C'est cette position écran qui permet de détecter les chevauchements.
+  */
+  const imageItems = [];
+
+  unique.forEach((feature) => {
+    const center = getFeatureCenterLatLng(feature);
+    if (!center) return;
+
+    const point = patternMap.latLngToLayerPoint(center);
+
+    imageItems.push({
+      feature,
+      center,
+      point
+    });
+  });
+
+  /*
+    Tri stable :
+    on place d'abord les images du haut vers le bas,
+    puis de gauche à droite.
+    Cela rend les décalages plus réguliers.
+  */
+  imageItems.sort((a, b) => {
+    if (a.point.y !== b.point.y) return a.point.y - b.point.y;
+    return a.point.x - b.point.x;
+  });
+
+  const placed = [];
+  const size = getPatternImageMarkerSize(patternMap);
+
+  imageItems.forEach((item) => {
+    const { feature, center, point } = item;
+
+    let chosenOffset = { x: 0, y: 0 };
+    let chosenPoint = { x: point.x, y: point.y };
+
+    /*
+      On teste d'abord la position normale.
+      Si elle chevauche une image déjà placée, on essaie une petite spirale.
+    */
+    for (let attempt = 0; attempt <= MAP_IMAGE_OFFSET_MAX_ATTEMPTS; attempt++) {
+      let ox = 0;
+      let oy = 0;
+
+      if (attempt > 0) {
+        const angle = attempt * 137.508 * Math.PI / 180;
+        const ring = Math.ceil(attempt / 6);
+        const radius = MAP_IMAGE_OFFSET_STEP * ring;
+
+        ox = Math.cos(angle) * radius;
+        oy = Math.sin(angle) * radius;
+      }
+
+      const testPoint = {
+        x: point.x + ox,
+        y: point.y + oy
+      };
+
+      let overlaps = false;
+
+      for (const other of placed) {
+        const minX =
+          (size.width / 2) +
+          (other.width / 2) +
+          MAP_IMAGE_COLLISION_PADDING;
+
+        const minY =
+          (size.height / 2) +
+          (other.height / 2) +
+          MAP_IMAGE_COLLISION_PADDING;
+
+        const tooCloseX = Math.abs(testPoint.x - other.x) < minX;
+        const tooCloseY = Math.abs(testPoint.y - other.y) < minY;
+
+        if (tooCloseX && tooCloseY) {
+          overlaps = true;
+          break;
+        }
+      }
+
+      if (!overlaps) {
+        chosenOffset = { x: ox, y: oy };
+        chosenPoint = testPoint;
+        break;
+      }
+    }
+
+    placed.push({
+      x: chosenPoint.x,
+      y: chosenPoint.y,
+      width: size.width,
+      height: size.height
+    });
+
+    const fid = cleanFragmentId(feature?.properties?.id);
+
+    const isSelected =
+      currentPatternMode === "agencements" &&
+      agencementCreation.active &&
+      agencementCreation.selectedFragments.has(fid);
+
+    const marker = L.marker(center, {
+      pane: "pane-pattern-image-markers",
+      icon: buildFloatingPhotoIcon(feature, {
+        selected: isSelected,
+        offset: chosenOffset
+      }),
+      keyboard: false
+    });
+
+    marker.on("click", (ev) => {
+      L.DomEvent.stopPropagation(ev);
+      onPatternsMapFragmentClick(feature);
+    });
+
+    marker.on("mouseover", () => {
+      const pane = patternMap.getPane("pane-pattern-image-markers");
+      const el = marker.getElement();
+
+      if (pane) pane.classList.add("photo-hover-active");
+      if (el) el.classList.add("is-hovered");
+
+      marker.setZIndexOffset(10000);
+    });
+
+    marker.on("mouseout", () => {
+      const pane = patternMap.getPane("pane-pattern-image-markers");
+      const el = marker.getElement();
+
+      if (pane) pane.classList.remove("photo-hover-active");
+      if (el) el.classList.remove("is-hovered");
+
+      marker.setZIndexOffset(0);
+    });
+
+    marker.addTo(patternImagesLayer);
+  });
+}
+
+function updateImageViewButtonUI() {
+  const btn = document.getElementById("toggle-image-view-btn");
+  if (!btn) return;
+
+  btn.classList.toggle("active", IMAGE_VIEW_MODE);
+  btn.setAttribute("aria-pressed", IMAGE_VIEW_MODE ? "true" : "false");
+  btn.textContent = IMAGE_VIEW_MODE ? "Images : ON" : "Images : OFF";
+}
+
+function toggleImageViewMode() {
+  IMAGE_VIEW_MODE = !IMAGE_VIEW_MODE;
+  updateImageViewButtonUI();
+
+  if (currentView === "fragment-proxemic") {
+    showFragmentProxemicView();
+    return;
+  }
+
+  if (currentView === "proxemic") {
+    if (currentPatternMode === "patterns") {
+      showProxemicView();
+    } else if (currentPatternMode === "agencements") {
+      showAgencementSelectionProxemicView();
+    }
+    return;
+  }
+
+  if (currentView === "patterns-map") {
+    renderPatternBaseGrey();
+
+    if (currentPatternMode === "patterns") {
+      refreshPatternsMap();
+    } else if (currentPatternMode === "agencements") {
+      refreshAgencementSelectionMap();
+    }
+  }
 }
 
 /* ==================================================
@@ -1304,12 +2009,13 @@ function buildTemporalFragmentIndex() {
       let delta = null;
 
       if (f1 && f2) {
-        const vec1 = featureToVector(f1);
-        const vec2 = featureToVector(f2);
-        const sim = similarityFuzzy(vec1, vec2);
-        delta = Math.max(0, 1 - sim);
+        const suite1 = featureToCriterionSuite(f1);
+const suite2 = featureToCriterionSuite(f2);
+const sim = similarityCriterionSuites(suite1, suite2);
 
-        status = delta > 0 ? 'modified' : 'stable';
+delta = Math.max(0, 1 - sim);
+
+status = delta > 0 ? 'modified' : 'stable';
       } else if (f1 && !f2) {
         status = 'disappeared';
       } else if (!f1 && f2) {
@@ -1764,29 +2470,7 @@ function getCurrentPatternParams() {
 }
 
 
-function getFragmentDominantPole(feature) {
-  const scores = {
-    PA: averageActiveFuzzyForFeature(feature, FUZZY_GROUPS.PA || []),
-    DH: averageActiveFuzzyForFeature(feature, FUZZY_GROUPS.DH || []),
-    FS: averageActiveFuzzyForFeature(feature, FUZZY_GROUPS.FS || [])
-  };
-
-  const ranked = Object.entries(scores)
-    .filter(([, v]) => v !== null)
-    .sort((a, b) => b[1] - a[1]);
-
-  if (!ranked.length) {
-    return { pole: 'OTHER', score: 0 };
-  }
-
-  return {
-    pole: ranked[0][0],
-    score: ranked[0][1]
-  };
-}
-
 function buildAgencementFragmentSequence(fragments = [], center = null) {
-  const poleRank = { PA: 0, DH: 1, FS: 2, OTHER: 3 };
   const c = center || latLngAverage(
     (fragments || []).map(getFeatureCenterLatLng).filter(Boolean)
   );
@@ -1795,101 +2479,101 @@ function buildAgencementFragmentSequence(fragments = [], center = null) {
     .filter(Boolean)
     .map(f => {
       const ll = getFeatureCenterLatLng(f);
-      const poleInfo = getFragmentDominantPole(f);
+      const criterionSuite = featureToCriterionSuite(f);
 
       return {
         id: cleanFragmentId(f?.properties?.id),
         feature: f,
+
+        // Conservé pour les panneaux de comparaison / diagnostics.
         vec: featureToVector(f),
+
+        // C'est ça qui sert vraiment à comparer les fragments.
+        criterionSuite,
+
+        // Conservé éventuellement pour affichage/debug, mais plus utilisé comme ordre.
+        suiteKey: criterionSuiteToLexKey(criterionSuite),
+
         temporal: computeFragmentTemporalProfile(f),
-        pole: poleInfo.pole,
-        poleScore: poleInfo.score ?? 0,
+
+        // Conservé comme information spatiale, mais plus utilisé pour ordonner la comparaison.
         distToCenter: (ll && c) ? distanceMeters(ll, c) : Infinity
       };
-    })
-    .sort((a, b) => {
-      const poleDiff = (poleRank[a.pole] ?? 99) - (poleRank[b.pole] ?? 99);
-      if (poleDiff !== 0) return poleDiff;
-
-      if (b.poleScore !== a.poleScore) {
-        return b.poleScore - a.poleScore;
-      }
-
-      if (a.distToCenter !== b.distToCenter) {
-        return a.distToCenter - b.distToCenter;
-      }
-
-      return String(a.id || '').localeCompare(
-        String(b.id || ''),
-        undefined,
-        { numeric: true }
-      );
     });
 }
 
-function computeSequentialFragmentPairScore(itemA, itemB, idxA, idxB, lenA, lenB) {
+function computeSequentialFragmentPairScore(itemA, itemB) {
   if (!itemA || !itemB) return 0;
 
-  const sFrag = similarityFuzzy(itemA.vec || [], itemB.vec || []);
+  const sSuite = similarityCriterionSuites(
+    itemA.criterionSuite || [],
+    itemB.criterionSuite || []
+  );
+
+  if (sSuite <= 0) return 0;
+
   const sTemporal = computeTemporalFragmentPairScore(
     itemA.temporal,
     itemB.temporal
   );
 
-  const posA = lenA <= 1 ? 0 : idxA / (lenA - 1);
-  const posB = lenB <= 1 ? 0 : idxB / (lenB - 1);
+  /*
+    Plus de sOrder ici.
+    Deux fragments sont comparés par :
+    - leur profil de critères ;
+    - leur profil temporel.
 
-  // bonus léger d’ordre : on reste permissif
-  const sOrder = Math.max(0, 1 - Math.abs(posA - posB) * 1.25);
-
-  return (sFrag * 0.75) + (sTemporal * 0.15) + (sOrder * 0.10);
+    Leur position dans une liste ne compte plus.
+  */
+  return (sSuite * 0.80) + (sTemporal * 0.20);
 }
 
 function similarityFragmentSequences(seqA = [], seqB = []) {
   if (!seqA.length || !seqB.length) return 0;
 
-  const small = seqA.length <= seqB.length ? seqA : seqB;
-  const large = seqA.length <= seqB.length ? seqB : seqA;
+  function averageBestScore(fromSeq, toSeq) {
+    let sum = 0;
 
-  const used = new Set();
-  let sum = 0;
-  let count = 0;
+    fromSeq.forEach(itemA => {
+      let best = 0;
 
-  small.forEach((itemA, idxA) => {
-    let bestScore = -1;
-    let bestIdx = -1;
+      toSeq.forEach(itemB => {
+        const s = computeSequentialFragmentPairScore(itemA, itemB);
 
-    large.forEach((itemB, idxB) => {
-      if (used.has(idxB)) return;
+        if (s > best) {
+          best = s;
+        }
+      });
 
-      const s = computeSequentialFragmentPairScore(
-        itemA,
-        itemB,
-        idxA,
-        idxB,
-        small.length,
-        large.length
-      );
-
-      if (s > bestScore) {
-        bestScore = s;
-        bestIdx = idxB;
-      }
+      sum += best;
     });
 
-    if (bestIdx >= 0) {
-      used.add(bestIdx);
-      sum += bestScore;
-      count++;
-    }
-  });
+    return sum / Math.max(fromSeq.length, 1);
+  }
 
-  if (!count) return 0;
+  const aToB = averageBestScore(seqA, seqB);
+  const bToA = averageBestScore(seqB, seqA);
 
-  // pénalité légère seulement si tailles vraiment différentes
-  const coverage = small.length / Math.max(large.length, 1);
+  /*
+    Comparaison non ordonnée :
+    - A cherche ses meilleurs équivalents dans B ;
+    - B cherche ses meilleurs équivalents dans A.
 
-  return (sum / count) * (0.85 + 0.15 * coverage);
+    Cela évite qu’un agencement avec beaucoup de fragments supplémentaires
+    soit considéré comme parfaitement similaire.
+  */
+  const bidirectionalScore = (aToB + bToA) / 2;
+
+  /*
+    Petite pénalité de taille.
+    Elle ne dépend pas des IDs.
+    Elle évite seulement qu'un agencement de 2 fragments soit trop facilement
+    équivalent à un agencement de 10 fragments.
+  */
+  const sizeRatio =
+    Math.min(seqA.length, seqB.length) / Math.max(seqA.length, seqB.length);
+
+  return bidirectionalScore * (0.90 + 0.10 * sizeRatio);
 }
 
 function similarityBuildingProfiles(profileA, profileB) {
@@ -1963,7 +2647,7 @@ function similarityAgencements(agA, agB) {
 
   // La séquence porte presque tout.
   // Le bâti et la taille restent des bonus légers.
-  return (sSeq * 0.82) + (sBuildings * 0.10) + (sSize * 0.08);
+  return (sSeq * 0.70) + (sBuildings * 0.25) + (sSize * 0.05);
 }
 
 function sameFragmentSet(idsA = [], idsB = []) {
@@ -2815,6 +3499,14 @@ function getVisibleSpatialFeaturesForPatterns() {
 function getPatternsForFragment(fragmentId) {
   const id = cleanFragmentId(fragmentId);
   return fragmentToPatternIds.get(id) || [];
+}
+
+function isFragmentInCurrentPatterns(feature) {
+  const id = cleanFragmentId(feature?.properties?.id);
+  if (!id) return false;
+
+  const patternList = fragmentToPatternIds.get(id);
+  return Array.isArray(patternList) && patternList.length > 0;
 }
 
 function toggleLocation() {
@@ -4172,49 +4864,49 @@ function renderPatternPanel(panel, patternKey, patternData) {
 
   appendSimpleBlock(panel, 'Structure récurrente', [
     {
-      label: 'Fragments',
+      label: 'Fragments - ',
       value: compactCountRange(fragmentCounts)
     },
     {
-      label: 'Bâtiments',
+      label: 'Bâtiments - ',
       value: compactCountRange(buildingCounts)
     },
     {
-      label: 'Base',
+      label: 'Base - ',
       value: patternData?.sourceAgencementId || '—'
     }
   ]);
 
   appendSimpleBlock(panel, 'Grappes récurrentes', [
     {
-      label: 'Usages',
+      label: 'Usages - ',
       value: compactRecurringList(grouping.recurringTexts.usages).join(', ') || '—'
     },
     {
-      label: 'Acteurs',
+      label: 'Acteurs - ',
       value: compactRecurringList(grouping.recurringTexts.acteur_actif).join(', ') || '—'
     },
     {
-      label: 'Initiateurs',
+      label: 'Initiateurs - ',
       value: compactRecurringList(grouping.recurringTexts.initiateur).join(', ') || '—'
     },
     {
-      label: 'Éléments',
+      label: 'Éléments - ',
       value: compactRecurringList(grouping.recurringTexts.elements_spatiaux).join(', ') || '—'
     }
   ]);
 
   appendSimpleBlock(panel, 'Contexte / temporalités', [
     {
-      label: 'Bâti',
+      label: 'Bâti - ',
       value: compactRecurringList(grouping.recurringBuildingStates, { maxItems: 3 }).join(', ') || '—'
     },
     {
-      label: 'Fonctions',
+      label: 'Fonctions - ',
       value: compactRecurringList(grouping.recurringBuildingFunctions, { maxItems: 3 }).join(', ') || '—'
     },
     {
-      label: 'Temporalités',
+      label: 'Temporalités - ',
       value: compactRecurringList(grouping.recurringTemporalStatuses, { maxItems: 3 }).join(', ') || '—'
     }
   ]);
@@ -5321,7 +6013,7 @@ function buildFragmentProxemicNodes(
   const sim = d3.forceSimulation(proxData)
     .force("x", d3.forceX(d => d.x).strength(1))
     .force("y", d3.forceY(d => d.y).strength(1))
-    .force("collide", d3.forceCollide(15))
+    .force("collide", d3.forceCollide(IMAGE_VIEW_MODE ? PROX_IMAGE_COLLIDE_RADIUS : 15))
     .stop();
 
   for (let i = 0; i < 200; i++) sim.tick();
@@ -5353,6 +6045,12 @@ function buildFragmentProxemicNodes(
       d.hasGhost = true;
     });
   }
+
+    proxData.forEach(d => {
+    const { width, height } = getProxemicNodeBoxDimensions();
+    d.nodeBoxWidth = width;
+    d.nodeBoxHeight = height;
+  });
 
   return proxData;
 }
@@ -5607,22 +6305,9 @@ function showFragmentProxemicView() {
     .attr("class", "node")
     .attr("transform", d => `translate(${d.x},${d.y})`);
 
-  nodes.append("circle")
-    .attr("r", 8)
-    .style("fill", d => getProxemicNodeStyle(d).fill)
-    .style("fill-opacity", d => getProxemicNodeStyle(d).fillOpacity)
-    .style("stroke", d => getProxemicNodeStyle(d).stroke)
-    .style("stroke-opacity", d => getProxemicNodeStyle(d).strokeOpacity)
-    .style("stroke-width", 1.2)
-    .style("cursor", "pointer");
-
-  nodes.append("text")
-    .text(d => d.id)
-    .attr("dy", "0.35em")
-    .style("text-anchor", "middle")
-    .style("font-size", "7px")
-    .style("font-weight", "bold")
-    .style("pointer-events", "none");
+  drawProxemicNodeVisuals(nodes, {
+    styleResolver: getProxemicNodeStyle
+  });
 
   let selected = null;
 
@@ -5894,9 +6579,11 @@ function buildGalleryDiscoursesCell(ag) {
 
 function getFragmentSimilarityScore(fa, fb) {
   if (!fa || !fb) return -1;
-  const va = featureToVector(fa);
-  const vb = featureToVector(fb);
-  return similarityFuzzy(va, vb);
+
+  const suiteA = featureToCriterionSuite(fa);
+  const suiteB = featureToCriterionSuite(fb);
+
+  return similarityCriterionSuites(suiteA, suiteB);
 }
 
 function orderFragmentsByReference(referenceFrags, candidateFrags) {
@@ -6137,82 +6824,84 @@ function showProxemicView() {
   proxemicView.innerHTML = "";
   proxemicView.style.position = proxemicView.style.position || "relative";
 
-const sourceFeatures = getFragmentProxemicSourceFeatures(currentFragmentTimeMode);
+    let sourceFeatures = getFragmentProxemicSourceFeatures(currentFragmentTimeMode);
 
-const scene = createSharedProxemicScene(proxemicView, {
-  includePatterns: true,
-  sourceFeatures,
-  layerOrder: ['slicesLayer', 'trajectoryLayer', 'contoursLayer', 'linksLayer', 'nodesLayer', 'labelsLayer']
-});
+  // En mode Patterns / Patterns :
+  // la proxémie ne montre que les fragments qui appartiennent à un pattern.
+  sourceFeatures = sourceFeatures.filter(isFragmentInCurrentPatterns);
 
-const { proxData, svg, layers } = scene;
-const { trajectoryLayer, contoursLayer, linksLayer, nodesLayer } = layers;
+  const scene = createSharedProxemicScene(proxemicView, {
+    includePatterns: true,
+    sourceFeatures,
+    layerOrder: ['slicesLayer', 'trajectoryLayer', 'contoursLayer', 'linksLayer', 'nodesLayer', 'labelsLayer']
+  });
+
+  const { proxData, svg, layers } = scene;
+  const { trajectoryLayer, contoursLayer, linksLayer, nodesLayer } = layers;
 
   if (!proxData.length) {
     proxemicView.innerHTML = "<div style='color:#aaa;padding:10px'>Aucun fragment.</div>";
     return;
   }
 
-
   function getProxemicNodeStyle(d) {
-  if (currentFragmentTimeMode !== 'trajectories') {
+    if (currentFragmentTimeMode !== 'trajectories') {
+      return {
+        fill: '#fff',
+        fillOpacity: 1,
+        stroke: '#222',
+        strokeOpacity: 1
+      };
+    }
+
+    const zone = d?.feature?.properties?.zone || d?.trajectoryPair?.zone || 'montreuil';
+    const status = d?.trajectoryStatus || 'identical';
+    const style = getTrajectoryStyle(status, zone);
+
     return {
-      fill: '#fff',
-      fillOpacity: 1,
-      stroke: '#222',
-      strokeOpacity: 1
+      fill: style.fillColor,
+      fillOpacity: style.fillOpacity,
+      stroke: style.color,
+      strokeOpacity: style.opacity
     };
   }
 
-  const zone = d?.feature?.properties?.zone || d?.trajectoryPair?.zone || 'montreuil';
-  const status = d?.trajectoryStatus || 'identical';
-  const style = getTrajectoryStyle(status, zone);
+  if (currentFragmentTimeMode === 'trajectories') {
+    const ghostData = proxData.filter(d => d.hasGhost);
 
-  return {
-    fill: style.fillColor,
-    fillOpacity: style.fillOpacity,
-    stroke: style.color,
-    strokeOpacity: style.opacity
-  };
-}
+    trajectoryLayer.selectAll("line.fragment-trajectory")
+      .data(ghostData)
+      .join("line")
+      .attr("class", "fragment-trajectory")
+      .attr("x1", d => d.ghostX)
+      .attr("y1", d => d.ghostY)
+      .attr("x2", d => d.x)
+      .attr("y2", d => d.y)
+      .style("stroke", d => {
+        const zone = d?.feature?.properties?.zone || 'montreuil';
+        return getTrajectoryStyle('modified', zone).color;
+      })
+      .style("stroke-width", 1.5)
+      .style("stroke-dasharray", "4 4")
+      .style("opacity", 0.9)
+      .style("pointer-events", "none");
 
-if (currentFragmentTimeMode === 'trajectories') {
-  const ghostData = proxData.filter(d => d.hasGhost);
-
-  trajectoryLayer.selectAll("line.fragment-trajectory")
-    .data(ghostData)
-    .join("line")
-    .attr("class", "fragment-trajectory")
-    .attr("x1", d => d.ghostX)
-    .attr("y1", d => d.ghostY)
-    .attr("x2", d => d.x)
-    .attr("y2", d => d.y)
-    .style("stroke", d => {
-      const zone = d?.feature?.properties?.zone || 'montreuil';
-      return getTrajectoryStyle('modified', zone).color;
-    })
-    .style("stroke-width", 1.5)
-    .style("stroke-dasharray", "4 4")
-    .style("opacity", 0.9)
-    .style("pointer-events", "none");
-
-  trajectoryLayer.selectAll("circle.fragment-ghost")
-    .data(ghostData)
-    .join("circle")
-    .attr("class", "fragment-ghost")
-    .attr("cx", d => d.ghostX)
-    .attr("cy", d => d.ghostY)
-    .attr("r", 8)
-    .style("fill", "none")
-    .style("stroke", d => {
-      const zone = d?.feature?.properties?.zone || 'montreuil';
-      return getTrajectoryStyle('modified', zone).color;
-    })
-    .style("stroke-width", 1.4)
-    .style("stroke-opacity", 0.65)
-    .style("pointer-events", "none");
-}
-
+    trajectoryLayer.selectAll("circle.fragment-ghost")
+      .data(ghostData)
+      .join("circle")
+      .attr("class", "fragment-ghost")
+      .attr("cx", d => d.ghostX)
+      .attr("cy", d => d.ghostY)
+      .attr("r", 8)
+      .style("fill", "none")
+      .style("stroke", d => {
+        const zone = d?.feature?.properties?.zone || 'montreuil';
+        return getTrajectoryStyle('modified', zone).color;
+      })
+      .style("stroke-width", 1.4)
+      .style("stroke-opacity", 0.65)
+      .style("pointer-events", "none");
+  }
 
   const diffTip = d3.select(proxemicView)
     .append("div")
@@ -6283,39 +6972,39 @@ if (currentFragmentTimeMode === 'trajectories') {
 
   drawPatternOccurrenceContoursInProxemic(contoursLayer, nodeById);
 
-const linksData = [];
-const linkSeen = new Set();
-const nodesByPattern = new Map();
+  const linksData = [];
+  const linkSeen = new Set();
+  const nodesByPattern = new Map();
 
-proxData.forEach(node => {
-  (node.patterns || []).forEach(p => {
-    if (!nodesByPattern.has(p)) nodesByPattern.set(p, []);
-    nodesByPattern.get(p).push(node);
+  proxData.forEach(node => {
+    (node.patterns || []).forEach(p => {
+      if (!nodesByPattern.has(p)) nodesByPattern.set(p, []);
+      nodesByPattern.get(p).push(node);
+    });
   });
-});
 
-nodesByPattern.forEach((nodesInPattern, pKey) => {
-  for (let i = 0; i < nodesInPattern.length; i++) {
-    for (let j = i + 1; j < nodesInPattern.length; j++) {
-      const A = nodesInPattern[i];
-      const B = nodesInPattern[j];
+  nodesByPattern.forEach((nodesInPattern, pKey) => {
+    for (let i = 0; i < nodesInPattern.length; i++) {
+      for (let j = i + 1; j < nodesInPattern.length; j++) {
+        const A = nodesInPattern[i];
+        const B = nodesInPattern[j];
 
-      const pairKey =
-        A.id < B.id ? `${A.id}__${B.id}` : `${B.id}__${A.id}`;
+        const pairKey =
+          A.id < B.id ? `${A.id}__${B.id}` : `${B.id}__${A.id}`;
 
-      if (linkSeen.has(pairKey)) continue;
-      linkSeen.add(pairKey);
+        if (linkSeen.has(pairKey)) continue;
+        linkSeen.add(pairKey);
 
-      linksData.push({
-        source: A,
-        target: B,
-        color: colorForPattern ? colorForPattern(pKey) : "#888",
-        dashed: false,
-        opacity: 0.25
-      });
+        linksData.push({
+          source: A,
+          target: B,
+          color: colorForPattern ? colorForPattern(pKey) : "#888",
+          dashed: false,
+          opacity: 0.25
+        });
+      }
     }
-  }
-});
+  });
 
   if (SHOW_DIFFRACTIONS) {
     const all = [...(dataGeojson || []), ...(datamGeojson || [])];
@@ -6398,76 +7087,46 @@ nodesByPattern.forEach((nodesInPattern, pKey) => {
     .attr("class", "node")
     .attr("transform", d => "translate(" + d.x + "," + d.y + ")");
 
-  nodes.each(function(d) {
-    if (!d.patterns) return;
+  drawPatternMembershipFrames(nodes);
 
-    d.patterns.slice()
-      .sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1)))
-      .forEach((p, i) => {
-        d3.select(this).append("circle")
-          .attr("r", 11 + i * 3)
-          .style("fill", "none")
-          .style("stroke", colorForPattern ? colorForPattern(p) : "#999")
-          .style("stroke-width", 2)
-          .style("pointer-events", "none");
-      });
+  drawProxemicNodeVisuals(nodes, {
+    styleResolver: getProxemicNodeStyle
   });
-
-  nodes.append("circle")
-  .attr("r", 8)
-  .style("fill", d => getProxemicNodeStyle(d).fill)
-  .style("fill-opacity", d => getProxemicNodeStyle(d).fillOpacity)
-  .style("stroke", d => getProxemicNodeStyle(d).stroke)
-  .style("stroke-opacity", d => getProxemicNodeStyle(d).strokeOpacity)
-  .style("stroke-width", 1.2)
-  .style("cursor", "pointer")
-    .on("click", (ev, d) => {
-      ev.stopPropagation();
-      openFragmentWithPatternsTabs(d.feature.properties);
-    });
-
-  nodes.append("text")
-    .text(d => d.id)
-    .attr("dy", "0.35em")
-    .style("text-anchor", "middle")
-    .style("font-size", "7px")
-    .style("font-weight", "bold")
-    .style("pointer-events", "none");
 
   let selected = null;
 
-function highlight(id) {
-  linksLayer.selectAll("line.link")
-    .style("opacity", d => (d.source.id === id || d.target.id === id) ? 0.9 : 0.05);
+  function highlight(id) {
+    linksLayer.selectAll("line.link")
+      .style("opacity", d => (d.source.id === id || d.target.id === id) ? 0.9 : 0.05);
 
-  const connected = new Set([id]);
-  linksData.forEach(L => {
-    if (L.source.id === id) connected.add(L.target.id);
-    if (L.target.id === id) connected.add(L.source.id);
-  });
+    const connected = new Set([id]);
+    linksData.forEach(L => {
+      if (L.source.id === id) connected.add(L.target.id);
+      if (L.target.id === id) connected.add(L.source.id);
+    });
 
-  nodes.style("opacity", n => connected.has(n.id) ? 1 : 0.1);
+    nodes.style("opacity", n => connected.has(n.id) ? 1 : 0.1);
 
-  if (currentFragmentTimeMode === 'trajectories') {
-    trajectoryLayer.selectAll("line.fragment-trajectory, circle.fragment-ghost")
-      .style("opacity", d => d.id === id ? 1 : 0.12);
+    if (currentFragmentTimeMode === 'trajectories') {
+      trajectoryLayer.selectAll("line.fragment-trajectory, circle.fragment-ghost")
+        .style("opacity", d => d.id === id ? 1 : 0.12);
+    }
   }
-}
 
-function reset() {
-  if (selected) return;
-  nodes.style("opacity", 1);
-  linksLayer.selectAll("line.link")
-    .style("opacity", 0.25);
+  function reset() {
+    if (selected) return;
+    nodes.style("opacity", 1);
+    linksLayer.selectAll("line.link")
+      .style("opacity", 0.25);
 
-  if (currentFragmentTimeMode === 'trajectories') {
-    trajectoryLayer.selectAll("line.fragment-trajectory")
-      .style("opacity", 0.9);
+    if (currentFragmentTimeMode === 'trajectories') {
+      trajectoryLayer.selectAll("line.fragment-trajectory")
+        .style("opacity", 0.9);
 
-    trajectoryLayer.selectAll("circle.fragment-ghost")
-      .style("opacity", 1);
+      trajectoryLayer.selectAll("circle.fragment-ghost")
+        .style("opacity", 1);
+    }
   }
-}
 
   nodes
     .on("mouseenter", function(ev, d) {
@@ -6540,15 +7199,14 @@ function initPatternMapOnce() {
     attribution: '© OpenStreetMap contributors, © CartoDB'
   }).addTo(patternMap);
 
-  // panes : TOUJOURS les créer avant getPane(...)
-patternMap.createPane('pane-pattern-buildings');
-patternMap.getPane('pane-pattern-buildings').style.zIndex = 410;
+  patternMap.createPane('pane-pattern-buildings');
+  patternMap.getPane('pane-pattern-buildings').style.zIndex = 410;
 
-patternMap.createPane('pane-pattern-base-polygons');
-patternMap.getPane('pane-pattern-base-polygons').style.zIndex = 420;
+  patternMap.createPane('pane-pattern-base-polygons');
+  patternMap.getPane('pane-pattern-base-polygons').style.zIndex = 420;
 
-patternMap.createPane('pane-pattern-base-points');
-patternMap.getPane('pane-pattern-base-points').style.zIndex = 430;
+  patternMap.createPane('pane-pattern-base-points');
+  patternMap.getPane('pane-pattern-base-points').style.zIndex = 430;
 
   patternMap.createPane('pane-pattern-members-buildings');
   patternMap.getPane('pane-pattern-members-buildings').style.zIndex = 500;
@@ -6562,21 +7220,38 @@ patternMap.getPane('pane-pattern-base-points').style.zIndex = 430;
   patternMap.createPane('pane-pattern-contours');
   patternMap.getPane('pane-pattern-contours').style.zIndex = 650;
 
+  patternMap.createPane('pane-pattern-image-markers');
+  patternMap.getPane('pane-pattern-image-markers').style.zIndex = 700;
+
   patternBaseLayer = L.layerGroup().addTo(patternMap);
   patternBuildingsLayer = L.layerGroup().addTo(patternMap);
   patternMembersLayer = L.layerGroup().addTo(patternMap);
   patternOverlayGroup = L.layerGroup().addTo(patternMap);
   savedAgencementsLayer = L.layerGroup().addTo(patternMap);
+  patternImagesLayer = L.layerGroup().addTo(patternMap);
 
   fetch('data/contour.geojson')
-  .then(r => r.json())
-  .then(contour => {
-    L.geoJSON(contour, {
-      style: { color: '#919090', weight: 2, opacity: 0.8, fillOpacity: 0 },
-      pane: 'pane-pattern-base-polygons',
-      interactive: false
-    }).addTo(patternMap);
-  });
+    .then(r => r.json())
+    .then(contour => {
+      L.geoJSON(contour, {
+        style: { color: '#919090', weight: 2, opacity: 0.8, fillOpacity: 0 },
+        pane: 'pane-pattern-base-polygons',
+        interactive: false
+      }).addTo(patternMap);
+    });
+
+  patternMap.on('zoomend', () => {
+  if (!IMAGE_VIEW_MODE) return;
+  if (currentView !== 'patterns-map') return;
+
+  renderPatternBaseGrey();
+
+  if (currentPatternMode === "patterns") {
+    refreshPatternsMap();
+  } else if (currentPatternMode === "agencements") {
+    refreshAgencementSelectionMap();
+  }
+});
 }
 
 function renderSavedAgencementsOnMap() {
@@ -6667,17 +7342,19 @@ function renderPatternBaseGrey() {
   patternBaseLayer.clearLayers();
   if (patternBuildingsLayer) patternBuildingsLayer.clearLayers();
 
-  const baseFeatures = getPatternBaseFeaturesForCurrentTimeMode();
+    let baseFeatures = getPatternBaseFeaturesForCurrentTimeMode();
 
-  const pointFeatures  = baseFeatures.filter(isPointGeometry);
-  const otherFeatures  = baseFeatures.filter(f => !isPointGeometry(f));
+  // En mode Patterns / Patterns :
+  // la couche grise de fond ne montre plus tous les fragments,
+  // seulement ceux qui appartiennent réellement à au moins un pattern.
+  // En mode Agencements, on garde tous les fragments visibles.
+  if (currentPatternMode === 'patterns') {
+    baseFeatures = baseFeatures.filter(isFragmentInCurrentPatterns);
+  }
 
-  /* --------------------------------------------------
-     1) Fragments polygones / lignes
-        → pane-pattern-base-polygons (z=410)
-        → pointer-events: stroke pour laisser passer
-          les clics sur le remplissage vers les bâtiments
-  -------------------------------------------------- */
+  const pointFeatures = baseFeatures.filter(isPointGeometry);
+  const otherFeatures = baseFeatures.filter(f => !isPointGeometry(f));
+
   if (otherFeatures.length) {
     const polygonGeoJSON = L.geoJSON(
       { type: 'FeatureCollection', features: otherFeatures },
@@ -6688,14 +7365,20 @@ function renderPatternBaseGrey() {
           if (currentFragmentTimeMode === 'trajectories') {
             const s = getGreyTrajectoryStyle(feature.properties?.__trajectoryStatus);
             return {
-              color: s.color, weight: s.weight,
+              color: s.color,
+              weight: s.weight,
               opacity: s.opacity,
-              fillColor: s.fillColor, fillOpacity: s.fillOpacity
+              fillColor: s.fillColor,
+              fillOpacity: s.fillOpacity
             };
           }
+
           return {
-            color: '#777', weight: 1, opacity: 1,
-            fillColor: '#777', fillOpacity: 0.25
+            color: '#777',
+            weight: 1,
+            opacity: 1,
+            fillColor: '#777',
+            fillOpacity: 0.25
           };
         },
 
@@ -6708,17 +7391,11 @@ function renderPatternBaseGrey() {
       }
     );
 
-    // Ajouter couche par couche et appliquer pointer-events: stroke
-polygonGeoJSON.eachLayer(sublayer => {
-  patternBaseLayer.addLayer(sublayer);
-});
+    polygonGeoJSON.eachLayer(sublayer => {
+      patternBaseLayer.addLayer(sublayer);
+    });
   }
 
-  /* --------------------------------------------------
-     2) Fragments points
-        → pane-pattern-base-points (z=430)
-        → pointer-events normal (cercle plein cliquable)
-  -------------------------------------------------- */
   if (pointFeatures.length) {
     const pointGeoJSON = L.geoJSON(
       { type: 'FeatureCollection', features: pointFeatures },
@@ -6731,15 +7408,22 @@ polygonGeoJSON.eachLayer(sublayer => {
             return L.circleMarker(latlng, {
               pane: 'pane-pattern-base-points',
               radius: s.radius,
-              color: s.color, weight: s.weight, opacity: s.opacity,
-              fillColor: s.fillColor, fillOpacity: s.fillOpacity
+              color: s.color,
+              weight: s.weight,
+              opacity: s.opacity,
+              fillColor: s.fillColor,
+              fillOpacity: s.fillOpacity
             });
           }
+
           return L.circleMarker(latlng, {
             pane: 'pane-pattern-base-points',
             radius: 4,
-            color: '#777', weight: 1, opacity: 1,
-            fillColor: '#777', fillOpacity: 0.80
+            color: '#777',
+            weight: 1,
+            opacity: 1,
+            fillColor: '#777',
+            fillOpacity: 0.80
           });
         },
 
@@ -6757,11 +7441,6 @@ polygonGeoJSON.eachLayer(sublayer => {
     });
   }
 
-  /* --------------------------------------------------
-     3) Bâtiments
-        → pane-pattern-buildings (z=420)
-        → entre les polygones-fragments et les points-fragments
-  -------------------------------------------------- */
   const bStyle = {
     stroke: false,
     fill: true,
@@ -6769,10 +7448,31 @@ polygonGeoJSON.eachLayer(sublayer => {
     fillOpacity: 0.22
   };
 
-  const buildingsVisible = [
+    let buildingsVisible = [
     ...(batimentsMontreuilGeojson || []),
-    ...(batimentsToulouseGeojson  || [])
+    ...(batimentsToulouseGeojson || [])
   ].filter(f => isFeatureInActiveZones(f));
+
+  // Option stricte en mode Patterns :
+  // on masque aussi les bâtiments qui ne sont dans aucun agencement de pattern.
+  // En mode Agencements, tous les bâtiments restent disponibles pour la sélection.
+  if (currentPatternMode === 'patterns') {
+    const patternBuildingIds = new Set();
+
+    Object.values(patterns || {}).forEach(pData => {
+      (pData?.occurrences || []).forEach(agId => {
+        const ag = agencementsById.get(agId);
+        (ag?.buildingIds || []).forEach(bid => {
+          patternBuildingIds.add(cleanFragmentId(bid));
+        });
+      });
+    });
+
+    buildingsVisible = buildingsVisible.filter(b => {
+      const bid = cleanFragmentId(b?.properties?.id);
+      return bid && patternBuildingIds.has(bid);
+    });
+  }
 
   if (patternBuildingsLayer && buildingsVisible.length) {
     L.geoJSON(
@@ -6797,6 +7497,8 @@ polygonGeoJSON.eachLayer(sublayer => {
       }
     ).addTo(patternBuildingsLayer);
   }
+
+  renderPatternImageMarkers(baseFeatures);
 }
 
 function addPatternMemberToMap(feature, color, patternKey) {
@@ -8096,7 +8798,10 @@ function refreshAgencementSelectionMap() {
   const ag = getCurrentManualAgencement();
   updateAgencementCreationButtons(ag);
 
-  if (!agencementCreation.active) return;
+  if (!agencementCreation.active) {
+    renderPatternImageMarkers(getPatternBaseFeaturesForCurrentTimeMode());
+    return;
+  }
 
   const contourLatLngs = buildAgencementBoundsLatLngs(ag);
   if (contourLatLngs && contourLatLngs.length >= 3) {
@@ -8164,6 +8869,8 @@ function refreshAgencementSelectionMap() {
       })
     }).addTo(window.manualAgencementLayer);
   });
+
+  renderPatternImageMarkers(getPatternBaseFeaturesForCurrentTimeMode());
 }
 
 function validateCurrentManualAgencement() {
@@ -8217,13 +8924,13 @@ const saved = {
 function showAgencementSelectionProxemicView() {
   proxemicView.innerHTML = '';
 
-const layout = buildSharedProxemicLayout(proxemicView);
-const sourceFeatures = getFragmentProxemicSourceFeatures(currentFragmentTimeMode);
+  const layout = buildSharedProxemicLayout(proxemicView);
+  const sourceFeatures = getFragmentProxemicSourceFeatures(currentFragmentTimeMode);
 
-const proxData = buildFragmentProxemicNodes(layout, {
-  includePatterns: false,
-  sourceFeatures
-});
+  const proxData = buildFragmentProxemicNodes(layout, {
+    includePatterns: false,
+    sourceFeatures
+  });
 
   if (!proxData.length) {
     proxemicView.innerHTML = "<div style='color:#aaa;padding:10px'>Aucun fragment.</div>";
@@ -8237,14 +8944,14 @@ const proxData = buildFragmentProxemicNodes(layout, {
     .attr("width", W)
     .attr("height", H);
 
-const world = svg.append("g");
-const slicesLayer = world.append("g");
-const trajectoryLayer = world.append("g");
-const contourLayer = world.append("g");
-const nodesLayer = world.append("g");
-const labelsLayer = world.append("g");
+  const world = svg.append("g");
+  const slicesLayer = world.append("g");
+  const trajectoryLayer = world.append("g");
+  const contourLayer = world.append("g");
+  const nodesLayer = world.append("g");
+  const labelsLayer = world.append("g");
 
-drawSharedProxemicBackground(slicesLayer, labelsLayer, layout);
+  drawSharedProxemicBackground(slicesLayer, labelsLayer, layout);
 
   svg.call(
     d3.zoom()
@@ -8252,69 +8959,69 @@ drawSharedProxemicBackground(slicesLayer, labelsLayer, layout);
       .on("zoom", ev => world.attr("transform", ev.transform))
   );
 
-const nodeById = new Map(proxData.map(d => [cleanFragmentId(d.id), d]));
+  const nodeById = new Map(proxData.map(d => [cleanFragmentId(d.id), d]));
 
   drawExistingAgencementContoursInProxemic(contourLayer, nodeById);
   drawManualAgencementContourInProxemic(contourLayer, nodeById);
 
   function getProxemicNodeStyle(d) {
-  if (currentFragmentTimeMode !== 'trajectories') {
+    if (currentFragmentTimeMode !== 'trajectories') {
+      return {
+        fill: '#fff',
+        fillOpacity: 1,
+        stroke: '#222',
+        strokeOpacity: 1
+      };
+    }
+
+    const zone = d?.feature?.properties?.zone || d?.trajectoryPair?.zone || 'montreuil';
+    const status = d?.trajectoryStatus || 'identical';
+    const style = getTrajectoryStyle(status, zone);
+
     return {
-      fill: '#fff',
-      fillOpacity: 1,
-      stroke: '#222',
-      strokeOpacity: 1
+      fill: style.fillColor,
+      fillOpacity: style.fillOpacity,
+      stroke: style.color,
+      strokeOpacity: style.opacity
     };
   }
 
-  const zone = d?.feature?.properties?.zone || d?.trajectoryPair?.zone || 'montreuil';
-  const status = d?.trajectoryStatus || 'identical';
-  const style = getTrajectoryStyle(status, zone);
+  if (currentFragmentTimeMode === 'trajectories') {
+    const ghostData = proxData.filter(d => d.hasGhost);
 
-  return {
-    fill: style.fillColor,
-    fillOpacity: style.fillOpacity,
-    stroke: style.color,
-    strokeOpacity: style.opacity
-  };
-}
+    trajectoryLayer.selectAll("line.fragment-trajectory")
+      .data(ghostData)
+      .join("line")
+      .attr("class", "fragment-trajectory")
+      .attr("x1", d => d.ghostX)
+      .attr("y1", d => d.ghostY)
+      .attr("x2", d => d.x)
+      .attr("y2", d => d.y)
+      .style("stroke", d => {
+        const zone = d?.feature?.properties?.zone || 'montreuil';
+        return getTrajectoryStyle('modified', zone).color;
+      })
+      .style("stroke-width", 1.5)
+      .style("stroke-dasharray", "4 4")
+      .style("opacity", 0.9)
+      .style("pointer-events", "none");
 
-if (currentFragmentTimeMode === 'trajectories') {
-  const ghostData = proxData.filter(d => d.hasGhost);
-
-  trajectoryLayer.selectAll("line.fragment-trajectory")
-    .data(ghostData)
-    .join("line")
-    .attr("class", "fragment-trajectory")
-    .attr("x1", d => d.ghostX)
-    .attr("y1", d => d.ghostY)
-    .attr("x2", d => d.x)
-    .attr("y2", d => d.y)
-    .style("stroke", d => {
-      const zone = d?.feature?.properties?.zone || 'montreuil';
-      return getTrajectoryStyle('modified', zone).color;
-    })
-    .style("stroke-width", 1.5)
-    .style("stroke-dasharray", "4 4")
-    .style("opacity", 0.9)
-    .style("pointer-events", "none");
-
-  trajectoryLayer.selectAll("circle.fragment-ghost")
-    .data(ghostData)
-    .join("circle")
-    .attr("class", "fragment-ghost")
-    .attr("cx", d => d.ghostX)
-    .attr("cy", d => d.ghostY)
-    .attr("r", 8)
-    .style("fill", "none")
-    .style("stroke", d => {
-      const zone = d?.feature?.properties?.zone || 'montreuil';
-      return getTrajectoryStyle('modified', zone).color;
-    })
-    .style("stroke-width", 1.4)
-    .style("stroke-opacity", 0.65)
-    .style("pointer-events", "none");
-}
+    trajectoryLayer.selectAll("circle.fragment-ghost")
+      .data(ghostData)
+      .join("circle")
+      .attr("class", "fragment-ghost")
+      .attr("cx", d => d.ghostX)
+      .attr("cy", d => d.ghostY)
+      .attr("r", 8)
+      .style("fill", "none")
+      .style("stroke", d => {
+        const zone = d?.feature?.properties?.zone || 'montreuil';
+        return getTrajectoryStyle('modified', zone).color;
+      })
+      .style("stroke-width", 1.4)
+      .style("stroke-opacity", 0.65)
+      .style("pointer-events", "none");
+  }
 
   const nodes = nodesLayer.selectAll("g.node")
     .data(proxData)
@@ -8323,53 +9030,34 @@ if (currentFragmentTimeMode === 'trajectories') {
     .attr("transform", d => `translate(${d.x},${d.y})`)
     .style("cursor", "pointer");
 
-
-nodes.append("circle")
-  .attr("r", d => agencementCreation.selectedFragments.has(String(d.id).trim()) ? 11 : 8)
-  .style("fill", d => getProxemicNodeStyle(d).fill)
-  .style("fill-opacity", d => getProxemicNodeStyle(d).fillOpacity)
-  .style("stroke", d =>
-    agencementCreation.selectedFragments.has(String(d.id).trim())
-      ? "#ffffff"
-      : getProxemicNodeStyle(d).stroke
-  )
-  .style("stroke-opacity", d => getProxemicNodeStyle(d).strokeOpacity)
-  .style("stroke-width", d =>
-    agencementCreation.selectedFragments.has(String(d.id).trim()) ? 3 : 1.2
-  );
-
-  nodes.append("text")
-    .text(d => d.id)
-    .attr("dy", "0.35em")
-    .style("text-anchor", "middle")
-    .style("font-size", "7px")
-    .style("font-weight", "bold")
-    .style("fill", "#000")
-    .style("pointer-events", "none");
+  drawProxemicNodeVisuals(nodes, {
+    styleResolver: getProxemicNodeStyle,
+    selectedResolver: (d) => agencementCreation.selectedFragments.has(String(d.id).trim())
+  });
 
   let selected = null;
 
-function highlight(id) {
-  nodes.style("opacity", n => n.id === id ? 1 : 0.15);
+  function highlight(id) {
+    nodes.style("opacity", n => n.id === id ? 1 : 0.15);
 
-  if (currentFragmentTimeMode === 'trajectories') {
-    trajectoryLayer.selectAll("line.fragment-trajectory, circle.fragment-ghost")
-      .style("opacity", d => d.id === id ? 1 : 0.12);
+    if (currentFragmentTimeMode === 'trajectories') {
+      trajectoryLayer.selectAll("line.fragment-trajectory, circle.fragment-ghost")
+        .style("opacity", d => d.id === id ? 1 : 0.12);
+    }
   }
-}
 
-function reset() {
-  if (selected) return;
-  nodes.style("opacity", 1);
+  function reset() {
+    if (selected) return;
+    nodes.style("opacity", 1);
 
-  if (currentFragmentTimeMode === 'trajectories') {
-    trajectoryLayer.selectAll("line.fragment-trajectory")
-      .style("opacity", 0.9);
+    if (currentFragmentTimeMode === 'trajectories') {
+      trajectoryLayer.selectAll("line.fragment-trajectory")
+        .style("opacity", 0.9);
 
-    trajectoryLayer.selectAll("circle.fragment-ghost")
-      .style("opacity", 1);
+      trajectoryLayer.selectAll("circle.fragment-ghost")
+        .style("opacity", 1);
+    }
   }
-}
 
   nodes
     .on("mouseenter", function(ev, d) {
@@ -8409,9 +9097,11 @@ function getScreenPointsForAgencementInProxemic(ag, nodeById) {
   const pts = [];
 
   (ag.fragmentIds || []).forEach(fid => {
-    const key = cleanFragmentId(fid); // ou cleanId(fid), mais une seule fonction partout
+    const key = cleanFragmentId(fid);
     const node = nodeById.get(key);
-    if (node) pts.push([node.x, node.y]);
+    if (!node) return;
+
+    pts.push(...getProxemicNodeFootprintPoints(node));
   });
 
   return pts;
@@ -9077,7 +9767,6 @@ function updateInterfaceElements(viewId) {
 
 const topTabs = document.querySelectorAll('.top-tab');
 const subnav = document.getElementById('subnav-patterns');
-const subnavUnit = document.getElementById('subnav-unit');
 const subnavFragments = document.getElementById('subnav-fragments');
 const patternModeTabs = document.querySelectorAll('.pattern-mode-tab');
 const patternViewTabs = document.querySelectorAll('.pattern-view-tab');
@@ -9116,9 +9805,6 @@ function showView(viewId) {
     setTimeout(() => patternMap.invalidateSize(), 0);
   }
 
-  if (viewId === 'unit-view' && unitMap?.invalidateSize) {
-    setTimeout(() => unitMap.invalidateSize(), 0);
-  }
 }
 
 function setFragmentSubTab(name) {
@@ -9141,48 +9827,34 @@ function setFragmentSubTab(name) {
 }
 
 function setTopTab(name) {
-  topTabs.forEach(btn => btn.classList.toggle('active', btn.dataset.top === name));
+  if (name !== 'fragments' && name !== 'patterns') {
+    name = 'fragments';
+  }
+
+  topTabs.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.top === name);
+  });
 
   if (subnavFragments) {
     subnavFragments.classList.toggle('subnav--inactive', name !== 'fragments');
   }
 
   if (name === 'fragments') {
-  subnav.classList.add('subnav--inactive');
-  if (subnavUnit) subnavUnit.classList.add('subnav--inactive');
-  if (subnavPatternsLevel3) subnavPatternsLevel3.classList.add('subnav--inactive');
-  if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.remove('subnav--inactive');
+    if (subnav) subnav.classList.add('subnav--inactive');
+    if (subnavPatternsLevel3) subnavPatternsLevel3.classList.add('subnav--inactive');
+    if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.remove('subnav--inactive');
 
-  setFragmentSubTab(currentFragmentSub || 'map');
-}
+    setFragmentSubTab(currentFragmentSub || 'map');
+  }
 
   else if (name === 'patterns') {
-  subnav.classList.remove('subnav--inactive');
-  if (subnavPatternsLevel3) subnavPatternsLevel3.classList.remove('subnav--inactive');
-  if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.add('subnav--inactive');
-  if (subnavUnit) subnavUnit.classList.add('subnav--inactive');
-  if (subnavFragments) subnavFragments.classList.add('subnav--inactive');
+    if (subnav) subnav.classList.remove('subnav--inactive');
+    if (subnavPatternsLevel3) subnavPatternsLevel3.classList.remove('subnav--inactive');
+    if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.add('subnav--inactive');
+    if (subnavFragments) subnavFragments.classList.add('subnav--inactive');
 
-  setPatternModeTab(currentPatternMode || 'agencements');
-}
-
-  else if (name === 'unit') {
-  subnav.classList.add('subnav--inactive');
-  if (subnavFragments) subnavFragments.classList.add('subnav--inactive');
-  if (subnavUnit) subnavUnit.classList.remove('subnav--inactive');
-  if (subnavPatternsLevel3) subnavPatternsLevel3.classList.add('subnav--inactive');
-  if (subnavPlaceholderLevel3) subnavPlaceholderLevel3.classList.remove('subnav--inactive');
-
-  currentView = 'unit';
-  showView('unit-view');
-  ensureUnitMap();
-  if (!unitContext) renderAllUnits();
-
-  setUnitSubTab(currentUnitSub || 'map');
-  updateInterfaceElements(currentView);
-}
-
-  if (unitCreation.active && name !== 'patterns') stopUnitCreation();
+    setPatternModeTab(currentPatternMode || 'agencements');
+  }
 }
 
 function setPatternModeTab(mode) {
@@ -9307,42 +9979,7 @@ if (viewName === 'proxemic') {
   updateInterfaceElements(currentView);
 }
 
-function setUnitSubTab(name) {
-  currentUnitSub = name;
 
-  const subBtns = document.querySelectorAll('.sub-tab-unit');
-  subBtns.forEach(b => b.classList.toggle('active', b.dataset.unitSub === name));
-
-  const elMap = document.getElementById('unit-map');
-  const elProx = document.getElementById('unit-proxemic');
-
-  if (!elMap || !elProx) return;
-
-  elMap.style.display = (name === 'map') ? 'block' : 'none';
-  elProx.style.display = (name === 'proxemic') ? 'block' : 'none';
-
-  if (name === 'map') {
-    ensureUnitMap();
-    setTimeout(() => unitMap?.invalidateSize?.(), 0);
-    // si on a un contexte, on le (re)rend
-    if (unitContext) renderUnitPatternContextOnUnitMap(unitContext.patternKey, unitContext.sourceFragmentId);
-  } else {
-    if (unitContext) renderUnitProxemicPattern(unitContext.patternKey, unitContext.sourceFragmentId);
-  }
-}
-
-/* ==================================================
- 17.5 Sous-navigation unité — IIFE
-================================================== */
-
-(function initUnitSubnavOnce(){
-  const subnavUnit = document.getElementById('subnav-unit');
-  if (!subnavUnit) return;
-
-  subnavUnit.querySelectorAll('.sub-tab-unit').forEach(btn => {
-    btn.addEventListener('click', () => setUnitSubTab(btn.dataset.unitSub));
-  });
-})();
 
 /* ==================================================
  17.6 Initialisation visuelle immédiate
@@ -9474,6 +10111,7 @@ if (galleryControls) {
 
     legend.style.display = showLegend ? 'block' : 'none';
   }
+    updateImageViewButtonUI();
 }
 
 function setFragmentTimeMode(mode) {
@@ -9810,3 +10448,17 @@ if (toggleDiscoursesCheckbox) {
     applyFilters();
   });
 }
+
+/* ==================================================
+19.9 Toggle image view
+================================================== */
+
+
+const toggleImageViewBtn = document.getElementById('toggle-image-view-btn');
+if (toggleImageViewBtn) {
+  toggleImageViewBtn.addEventListener('click', () => {
+    toggleImageViewMode();
+  });
+}
+
+updateImageViewButtonUI();
